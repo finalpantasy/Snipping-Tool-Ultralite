@@ -1,0 +1,23 @@
+name: Windows checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  headless:
+    runs-on: windows-latest
+    env:
+      SNIPPING_TOOL_UL_CONFIG_DIR: ${{ github.workspace }}/target/test-config
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets
+      - shell: pwsh
+        run: ./scripts/Test-CurrentUserIntegration.ps1
+      - shell: pwsh
+        run: ./scripts/Build-Portable.ps1

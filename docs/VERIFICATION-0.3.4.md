@@ -1,0 +1,11 @@
+# 0.3.4 unified teal header and transparent icons
+
+The native Windows caption always uses the same theme base as the solid command band, including with acrylic presentation. The workspace stays frosted. Windows retains its caption buttons, dragging, resizing and snap behavior; system high contrast still takes precedence. Dark remains the default and existing light preferences are preserved. Both palettes now use restrained teal neutrals.
+
+The supplied transparent bird SVG is prepared offline into nine PNG-backed ICO sizes (16, 20, 24, 32, 40, 48, 64, 128 and 256 pixels), a 64px straight-alpha window/taskbar buffer and a 256px documentation PNG. There is no ivory tile. The supplied tray silhouette uses aqua on dark taskbars and deeper teal on light taskbars. Taskbar theme is read once at startup. Original supplied files remain untouched, and the tiled ICO is retained as an alternate source asset.
+
+The actual home, editor and settings clients are rendered headlessly over illustrative backdrops, including minimum size, physical DPI and keyboard focus cases. These images are synthetic client renders and do not show the native frame. Secondary body labels meet worst-case contrast of 4.75:1 in dark mode and 4.78:1 in light mode. Primary button labels remain 4.70:1. Icon preparation adds no runtime SVG parsing, PNG decoding, polling or redraw loop.
+
+Headless Rust tests, formatting, five mocked installer scenarios, read-only executable resource extraction, raw-buffer checks, safe CLI validation and package identity/hash checks are required before installation. The private synthetic presentation probe verifies accepted caption setters and both presenters without switching the input desktop. It performs no capture, clipboard, hotkey, tray, notification or upload operations. It does not prove native appearance or full-app performance.
+
+Versioned installation preserves existing app processes and does not launch the app. Quit UL from its tray menu and reopen Snipping Tool to load the update. Native appearance, real capture/paste, mixed monitors, timers/hotkeys, uploads and total-process performance remain isolated acceptance work. GitHub publication is pending real working-media evidence.

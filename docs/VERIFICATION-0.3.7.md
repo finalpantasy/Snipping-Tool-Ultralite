@@ -1,0 +1,5 @@
+# 0.3.7 annotation palette
+
+Default annotation swatches use saturated red `#FF0000`, blue `#0066FF`, green `#00C000`, yellow `#FFDD00` and purple `#A000FF`. Settings and editor swatches share the color definitions. Existing saved named colors resolve to the updated palette; custom hex colors remain intact. Legacy named orange, teal, sky, lavender and white colors are also more vivid. Highlight transparency is unchanged. The frosted interface still uses its existing teal theme.
+
+Validation uses the existing headless unit/integration suite and actual light/dark client renders with synthetic content, followed by format, remapped build, package identity/hash and installed-binary checks. No native windows, captures, clipboard writes, hotkey/tray registration, notifications or live uploads are run on the working desktop. The installed update is not launched and the previous process is preserved. The [0.3.6 verification](VERIFICATION-0.3.6.md) and [publication checklist](PUBLICATION.md) retain the remaining native acceptance and genuine working-media gates.

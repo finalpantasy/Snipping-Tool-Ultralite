@@ -1,0 +1,84 @@
+[package]
+name = "snipping-tool-ul"
+version = "0.3.8"
+authors = ["Snipping Tool UL contributors"]
+description = "Snipping Tool UL: lightweight Windows screenshot capture, clipboard, annotation and image sharing"
+license = "MIT"
+edition = "2021"
+rust-version = "1.88"
+
+[dependencies]
+winit = "0.30"
+softbuffer = "0.4"
+tiny-skia = "0.11"
+tray-icon = "0.19"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+thiserror = "2"
+arboard = { version = "3", features = ["image-data"] }
+rfd = "0.15"
+chrono = "0.4"
+global-hotkey = "0.6"
+fontdue = "0.9"
+# Same version and features fontdue already uses; reads the cmap for lazy glyph loading.
+ttf-parser = { version = "0.21", default-features = false, features = ["opentype-layout"] }
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+dirs = "6"
+clap = { version = "4", features = ["derive"] }
+notify-rust = "4"
+ureq = "2"
+serde_json = "1"
+base64 = "0.22"
+# Icons and the logo are plain paths: no SVG text, fonts or raster images.
+resvg = { version = "0.44", default-features = false }
+ring = "0.17"
+
+[dev-dependencies]
+# examples/render_design_svg.rs renders design mockups that contain SVG text.
+# Resolver 2 keeps these features out of the shipped binary.
+resvg = "0.44"
+
+[build-dependencies]
+winres = "0.1"
+
+# Optimize dependencies even in dev builds — critical for GUI responsiveness.
+# Without this, pixel operations (tiny-skia, fontdue, softbuffer) are 10-50x slower.
+[profile.dev.package."*"]
+opt-level = 2
+
+# Keep our own code at opt-level 1 for faster compile + reasonable speed
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_HiDpi",
+    "Win32_System_Registry",
+    "Win32_UI_Controls_Dialogs",
+    "Win32_UI_Accessibility",
+    "Win32_UI_Shell",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_Threading",
+    "Win32_System_StationsAndDesktops",
+    "Win32_System_ProcessStatus",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_Security",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = "0.13"

@@ -1,0 +1,2 @@
+[build]
+# Portable builds use scripts/Build-Portable.ps1 to remap the complete user path.

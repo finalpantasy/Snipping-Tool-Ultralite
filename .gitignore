@@ -1,0 +1,44 @@
+# Build
+target/
+
+# Generated test files
+/icon_*.png
+/capture_test_*.png
+
+# Generated icon
+assets/icon.ico
+
+# Design drafts
+logo-concepts*.html
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tooling state
+.omc/
+
+# Environment
+.env
+.env.*
+
+# Internal design docs
+docs/superpowers/
+
+# Release artifacts
+release/
+
+# Nested repo (development only)
+hydroshot/
+target2/
+
+# Local execution history and development-only reference drafts
+/STATE.md
+/design/logo-options/
