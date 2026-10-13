@@ -28,7 +28,7 @@ pub fn acquire(
                     EVENT_MODIFY_STATE, INFINITE,
                 },
                 UI::WindowsAndMessaging::{
-                    AllowSetForegroundWindow, FindWindowW, GetWindowThreadProcessId,
+                    AllowSetForegroundWindow, FindWindowW, GetWindowThreadProcessId, ASFW_ANY,
                 },
             },
         };
@@ -45,6 +45,11 @@ pub fn acquire(
                 if pid != 0 {
                     let _ = AllowSetForegroundWindow(pid);
                 }
+            } else {
+                // Home is destroyed while the app sits in the tray, so there is
+                // no window to find. This launcher is foreground; let the running
+                // process take focus when it recreates Home.
+                let _ = AllowSetForegroundWindow(ASFW_ANY);
             }
             for _ in 0..25 {
                 if let Ok(event) = OpenEventW(

@@ -12,6 +12,18 @@ pub fn parse_binding(binding: &str) -> Result<(Modifiers, Code), String> {
 
     let mut modifiers = Modifiers::empty();
     let mut key_code: Option<Code> = None;
+    // A bare letter or digit would swallow ordinary typing system-wide;
+    // function keys and PrintScreen are the only keys allowed without modifiers.
+    let mut needs_modifier = false;
+
+    let mut set_key = |code: Code, bare_ok: bool| -> Result<(), String> {
+        if key_code.is_some() {
+            return Err("A hotkey can have only one non-modifier key".into());
+        }
+        key_code = Some(code);
+        needs_modifier = !bare_ok;
+        Ok(())
+    };
 
     for part in &parts {
         match part.trim().to_lowercase().as_str() {
@@ -19,28 +31,32 @@ pub fn parse_binding(binding: &str) -> Result<(Modifiers, Code), String> {
             "shift" => modifiers |= Modifiers::SHIFT,
             "alt" => modifiers |= Modifiers::ALT,
             "super" | "meta" | "win" => modifiers |= Modifiers::SUPER,
-            "printscreen" => key_code = Some(Code::PrintScreen),
-            "f1" => key_code = Some(Code::F1),
-            "f2" => key_code = Some(Code::F2),
-            "f3" => key_code = Some(Code::F3),
-            "f4" => key_code = Some(Code::F4),
-            "f5" => key_code = Some(Code::F5),
-            "f6" => key_code = Some(Code::F6),
-            "f7" => key_code = Some(Code::F7),
-            "f8" => key_code = Some(Code::F8),
-            "f9" => key_code = Some(Code::F9),
-            "f10" => key_code = Some(Code::F10),
-            "f11" => key_code = Some(Code::F11),
-            "f12" => key_code = Some(Code::F12),
+            "printscreen" => set_key(Code::PrintScreen, true)?,
+            "f1" => set_key(Code::F1, true)?,
+            "f2" => set_key(Code::F2, true)?,
+            "f3" => set_key(Code::F3, true)?,
+            "f4" => set_key(Code::F4, true)?,
+            "f5" => set_key(Code::F5, true)?,
+            "f6" => set_key(Code::F6, true)?,
+            "f7" => set_key(Code::F7, true)?,
+            "f8" => set_key(Code::F8, true)?,
+            "f9" => set_key(Code::F9, true)?,
+            "f10" => set_key(Code::F10, true)?,
+            "f11" => set_key(Code::F11, true)?,
+            "f12" => set_key(Code::F12, true)?,
             s if s.len() == 1 => {
                 let c = s.chars().next().unwrap();
-                key_code = Some(char_to_code(c).ok_or_else(|| format!("Unknown hotkey key: {c}"))?);
+                let code = char_to_code(c).ok_or_else(|| format!("Unknown hotkey key: {c}"))?;
+                set_key(code, false)?;
             }
             other => return Err(format!("Unknown hotkey part: {other}")),
         }
     }
 
     let code = key_code.ok_or("No key code found in hotkey binding")?;
+    if needs_modifier && modifiers.is_empty() {
+        return Err("Add Ctrl, Alt, Shift or Win: a bare key would block normal typing".into());
+    }
     Ok((modifiers, code))
 }
 

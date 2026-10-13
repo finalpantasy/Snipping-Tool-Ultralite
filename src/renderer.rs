@@ -4,7 +4,7 @@ use crate::overlay::selection::Selection;
 use crate::overlay::toolbar::{ButtonAction, BUTTONS};
 use crate::state::OverlayState;
 use crate::tools::{
-    annotation_bounding_box, measure_text_width, render_annotation, Annotation, AnnotationTool,
+    annotation_resize_bounds, measure_text_width, render_annotation, Annotation, AnnotationTool,
     ToolKind,
 };
 use tiny_skia::{Paint, PathBuilder, Stroke, Transform};
@@ -177,14 +177,10 @@ pub fn render_overlay(state: &mut OverlayState, pixmap: &mut tiny_skia::Pixmap) 
         }
     }
 
-    // 5. Finalized annotations
     let ss_pixels = Some(state.screenshot.pixels.as_slice());
     let ss_width = Some(state.screenshot.width);
-    for annotation in &state.annotations {
-        render_annotation(annotation, pixmap, ss_pixels, ss_width);
-    }
 
-    // 6. In-progress annotation preview
+    // 5. In-progress annotation preview
     let in_progress = match state.active_tool {
         ToolKind::Select => None,
         ToolKind::Arrow => state.arrow_tool.in_progress_annotation(),
@@ -201,11 +197,11 @@ pub fn render_overlay(state: &mut OverlayState, pixmap: &mut tiny_skia::Pixmap) 
         ToolKind::Spotlight => state.spotlight_tool.in_progress_annotation(),
         ToolKind::Measurement => state.measurement_tool.in_progress_annotation(),
     };
-    if let Some(ref ann) = in_progress {
-        render_annotation(ann, pixmap, ss_pixels, ss_width);
-    }
 
-    // 6a. Spotlight effect — dim everything outside spotlight rectangles
+    // 6. Spotlight effect — dim everything outside spotlight rectangles. This
+    // runs before the annotations are drawn so each one is composited exactly
+    // once; drawing them under the dim and again on top doubled translucent
+    // highlights and thickened anti-aliased edges.
     {
         let mut spotlights: Vec<(crate::geometry::Point, crate::geometry::Size)> = state
             .annotations
@@ -220,62 +216,28 @@ pub fn render_overlay(state: &mut OverlayState, pixmap: &mut tiny_skia::Pixmap) 
             spotlights.push((*top_left, *size));
         }
         if !spotlights.is_empty() {
-            // Dim the entire pixmap with 50% black overlay
-            let pw = pixmap.width() as f32;
-            let ph = pixmap.height() as f32;
-            if let Some(r) = tiny_skia::Rect::from_xywh(0.0, 0.0, pw, ph) {
-                let mut dim = Paint::default();
-                dim.set_color(tiny_skia::Color::from_rgba(0.0, 0.0, 0.0, 0.5).unwrap());
-                dim.anti_alias = false;
-                pixmap.fill_rect(r, &dim, Transform::identity(), None);
-            }
-
-            // Restore bright areas from the single source image.
-            let src_w = state.screenshot.width;
-            let screenshot_data = &state.screenshot.pixels;
-            for (tl, sz) in &spotlights {
-                // Shrink the region when the origin is clamped so the cutout
-                // matches the annotation rect instead of extending right/down.
-                let sw = (sz.width + tl.x.min(0.0)).max(0.0) as u32;
-                let sh = (sz.height + tl.y.min(0.0)).max(0.0) as u32;
-                let sx = tl.x.max(0.0) as u32;
-                let sy = tl.y.max(0.0) as u32;
-                let pm_w = pixmap.width();
-                let pm_h = pixmap.height();
-                let pixmap_data = pixmap.data_mut();
-                for y in sy..(sy + sh).min(pm_h) {
-                    let row_start = ((y * src_w + sx) * 4) as usize;
-                    let copy_w = sw
-                        .min(src_w.saturating_sub(sx))
-                        .min(pm_w.saturating_sub(sx));
-                    let row_end = row_start + (copy_w * 4) as usize;
-                    let dst_start = ((y * pm_w + sx) * 4) as usize;
-                    let dst_end = dst_start + (copy_w * 4) as usize;
-                    if row_end <= screenshot_data.len() && dst_end <= pixmap_data.len() {
-                        pixmap_data[dst_start..dst_end]
-                            .copy_from_slice(&screenshot_data[row_start..row_end]);
-                    }
-                }
-            }
-
-            // Re-draw non-spotlight annotations so they remain visible over dimmed areas
-            for ann in &state.annotations {
-                if !matches!(ann, Annotation::Spotlight { .. }) {
-                    render_annotation(ann, pixmap, ss_pixels, ss_width);
-                }
-            }
-            if let Some(ref ann) = in_progress {
-                if !matches!(ann, Annotation::Spotlight { .. }) {
-                    render_annotation(ann, pixmap, ss_pixels, ss_width);
-                }
-            }
+            // Same routine the export path uses, so Copy/Save match the screen.
+            crate::export::apply_spotlights(
+                pixmap,
+                &state.screenshot.pixels,
+                state.screenshot.width,
+                &spotlights,
+            );
         }
+    }
+
+    // 6a. Finalized annotations, then the in-progress one, drawn once each
+    for annotation in &state.annotations {
+        render_annotation(annotation, pixmap, ss_pixels, ss_width);
+    }
+    if let Some(ref ann) = in_progress {
+        render_annotation(ann, pixmap, ss_pixels, ss_width);
     }
 
     // 6b. Selection highlight around selected annotation
     if let Some(idx) = state.selected_index {
         if let Some(ann) = state.annotations.get(idx) {
-            if let Some((bx, by, bw, bh)) = annotation_bounding_box(ann) {
+            if let Some((bx, by, bw, bh)) = annotation_resize_bounds(ann) {
                 render_selection_highlight(pixmap, bx - 4.0, by - 4.0, bw + 8.0, bh + 8.0);
             }
         }

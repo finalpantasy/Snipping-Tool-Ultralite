@@ -1,8 +1,8 @@
 use super::{CaptureError, CapturedScreen, ScreenCapture, ScreenRect};
 use windows::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits,
-    GetDeviceCaps, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, LOGPIXELSX,
-    SRCCOPY,
+    GetDeviceCaps, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CAPTUREBLT, DIB_RGB_COLORS,
+    LOGPIXELSX, SRCCOPY,
 };
 use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -69,6 +69,18 @@ unsafe fn capture_rect(rect: ScreenRect) -> Result<CapturedScreen, CaptureError>
         return Err(CaptureError::NoDisplay);
     }
 
+    // Reserve before taking GDI resources so allocation failure cannot leak
+    // handles. Frozen selection temporarily needs the whole virtual desktop.
+    let buf_size = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|n| n.checked_mul(4))
+        .ok_or_else(|| CaptureError::PlatformError("Screen image is too large".into()))?;
+    let mut bgra_pixels = Vec::new();
+    bgra_pixels
+        .try_reserve_exact(buf_size)
+        .map_err(|_| CaptureError::PlatformError("Not enough memory for screen snapshot".into()))?;
+    bgra_pixels.resize(buf_size, 0u8);
+
     let hdc_screen = unsafe { GetDC(None) };
     if hdc_screen.is_invalid() {
         return Err(CaptureError::PlatformError(
@@ -97,7 +109,20 @@ unsafe fn capture_rect(rect: ScreenRect) -> Result<CapturedScreen, CaptureError>
 
     let old_bm = unsafe { SelectObject(hdc_mem, hbm) };
 
-    let blt_result = unsafe { BitBlt(hdc_mem, 0, 0, width, height, hdc_screen, x, y, SRCCOPY) };
+    // Include existing layered popups/tooltips in the frozen screen image.
+    let blt_result = unsafe {
+        BitBlt(
+            hdc_mem,
+            0,
+            0,
+            width,
+            height,
+            hdc_screen,
+            x,
+            y,
+            SRCCOPY | CAPTUREBLT,
+        )
+    };
     if blt_result.is_err() {
         unsafe {
             SelectObject(hdc_mem, old_bm);
@@ -129,9 +154,6 @@ unsafe fn capture_rect(rect: ScreenRect) -> Result<CapturedScreen, CaptureError>
         },
         bmiColors: [Default::default()],
     };
-
-    let buf_size = (width as usize) * (height as usize) * 4;
-    let mut bgra_pixels: Vec<u8> = vec![0u8; buf_size];
 
     let lines = unsafe {
         GetDIBits(

@@ -78,7 +78,8 @@ impl OverlayState {
             return;
         }
         let buffer = std::mem::take(&mut self.text_input_buffer);
-        let ann = (!buffer.is_empty()).then(|| Annotation::Text {
+        // Whitespace-only text would commit an invisible annotation and an undo step.
+        let ann = (!buffer.trim().is_empty()).then(|| Annotation::Text {
             position: self.text_input_position,
             text: buffer,
             color: self.current_color,
@@ -87,12 +88,15 @@ impl OverlayState {
         if let Some((idx, old)) = self.text_edit_origin.take() {
             let idx = idx.min(self.annotations.len());
             if let Some(ann) = ann {
+                let changed = ann != old;
                 self.annotations.insert(idx, ann);
-                crate::tools::record_undo(
-                    &mut self.undo_stack,
-                    &mut self.redo_stack,
-                    UndoAction::Modify(idx, old),
-                );
+                if changed {
+                    crate::tools::record_undo(
+                        &mut self.undo_stack,
+                        &mut self.redo_stack,
+                        UndoAction::Modify(idx, old),
+                    );
+                }
             } else {
                 crate::tools::record_undo(
                     &mut self.undo_stack,
@@ -171,6 +175,7 @@ impl OverlayState {
         }
         crate::overlay::toolbar::Toolbar::position_for_dynamic(
             selection,
+            self.screenshot.width as f32,
             self.canvas_height as f32,
             self.visible_buttons.len(),
         )

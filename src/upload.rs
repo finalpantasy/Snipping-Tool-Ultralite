@@ -180,19 +180,39 @@ pub fn upload_no_setup(png: &[u8], host: UploadHost) -> Result<String, String> {
     let request = no_setup_request(png, host, &format!("SnippingToolUL{nonce:x}"))?;
     let response = ureq::AgentBuilder::new()
         .redirects(0)
-        .timeout(Duration::from_secs(30))
+        .timeout_connect(Duration::from_secs(15))
+        .timeout_read(Duration::from_secs(30))
+        .timeout_write(Duration::from_secs(120))
+        .timeout(Duration::from_secs(180))
         .build()
         .post(request.endpoint)
         .set("Content-Type", &request.content_type)
         .send_bytes(&request.body)
         .map_err(|e| format!("{} request failed: {e}", host.name()))?;
-    let mut reply = String::new();
+    let reply = read_success_response(response, host.name(), 65_536)?;
+    no_setup_link(&reply, host)
+}
+
+fn read_success_response(
+    response: ureq::Response,
+    service: &str,
+    max_bytes: usize,
+) -> Result<String, String> {
+    let status = response.status();
+    if !(200..300).contains(&status) {
+        return Err(format!("{service} returned HTTP status {status}."));
+    }
+
+    let mut body = String::new();
     response
         .into_reader()
-        .take(65_537)
-        .read_to_string(&mut reply)
+        .take(max_bytes.saturating_add(1) as u64)
+        .read_to_string(&mut body)
         .map_err(|e| e.to_string())?;
-    no_setup_link(&reply, host)
+    if body.len() > max_bytes {
+        return Err(format!("{service} response was too large."));
+    }
+    Ok(body)
 }
 
 /// Fingerprint the actual flattened image and destination, never its filename.
@@ -349,7 +369,10 @@ pub fn upload_to_catbox(png_data: &[u8]) -> Result<String, String> {
     let body = catbox_body(png_data, &boundary)?;
     let agent = ureq::AgentBuilder::new()
         .redirects(0)
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout_connect(Duration::from_secs(15))
+        .timeout_read(Duration::from_secs(30))
+        .timeout_write(Duration::from_secs(120))
+        .timeout(Duration::from_secs(180))
         .build();
     let response = agent
         .post("https://catbox.moe/user/api.php")
@@ -359,12 +382,7 @@ pub fn upload_to_catbox(png_data: &[u8]) -> Result<String, String> {
         )
         .send_bytes(&body)
         .map_err(|e| format!("Catbox request failed: {e}"))?;
-    let mut reply = String::new();
-    response
-        .into_reader()
-        .take(4097)
-        .read_to_string(&mut reply)
-        .map_err(|e| e.to_string())?;
+    let reply = read_success_response(response, "Catbox", 4096)?;
     catbox_link(&reply)
 }
 
@@ -477,18 +495,112 @@ pub fn upload_to_imgur(png_data: &[u8], config_client_id: &str) -> Result<String
     };
 
     let client_id = imgur_client_id(config_client_id)?;
-    let response = ureq::post("https://api.imgur.com/3/image")
+    let response = ureq::AgentBuilder::new()
+        .redirects(0)
+        .build()
+        .post("https://api.imgur.com/3/image")
         .set("Authorization", &format!("Client-ID {}", client_id))
         .timeout(std::time::Duration::from_secs(30))
         .send_form(&[("image", &base64_image), ("type", "base64")])
         .map_err(|e| format!("Upload failed: {}", e))?;
 
-    let body: String = response.into_string().map_err(|e| e.to_string())?;
+    let body = read_success_response(response, "Imgur", 65_536)?;
 
-    extract_link(&body).ok_or_else(|| "Failed to parse Imgur response".to_string())
+    parse_imgur_response(&body)
 }
 
-fn extract_link(json: &str) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(json).ok()?;
-    v["data"]["link"].as_str().map(|s| s.to_string())
+fn parse_imgur_response(json: &str) -> Result<String, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|_| "Failed to parse Imgur response".to_string())?;
+    let status = value["status"].as_u64();
+    if value["success"].as_bool() != Some(true)
+        || !status.is_some_and(|status| (200..300).contains(&status))
+    {
+        return Err("Imgur did not accept the image.".into());
+    }
+
+    let link = value["data"]["link"].as_str().unwrap_or("");
+    let path = link.strip_prefix("https://i.imgur.com/").unwrap_or("");
+    if valid_imgur_image_path(path) {
+        Ok(link.to_owned())
+    } else {
+        Err("Imgur did not return a valid image link.".into())
+    }
+}
+
+fn valid_imgur_image_path(path: &str) -> bool {
+    let Some((name, extension)) = path.rsplit_once('.') else {
+        return false;
+    };
+    !name.is_empty()
+        && name.len() <= 128
+        && matches!(extension, "png" | "jpg" | "jpeg" | "gif" | "webp")
+        && path.len() <= 256
+        && !path.contains("..")
+        && path
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+}
+
+#[cfg(test)]
+mod response_guard_tests {
+    use super::*;
+
+    fn response(status: u16, body: &str) -> ureq::Response {
+        ureq::Response::new(status, "synthetic", body).unwrap()
+    }
+
+    #[test]
+    fn upload_responses_require_2xx_and_enforce_a_read_limit() {
+        for status in [200, 299] {
+            assert_eq!(
+                read_success_response(response(status, "ok"), "Synthetic", 2).unwrap(),
+                "ok"
+            );
+        }
+        for status in [199, 300, 302, 500] {
+            assert!(
+                read_success_response(response(status, "redirect or error"), "Synthetic", 64)
+                    .unwrap_err()
+                    .contains(&status.to_string())
+            );
+        }
+        assert!(read_success_response(response(200, "oversized"), "Synthetic", 4).is_err());
+    }
+
+    #[test]
+    fn imgur_response_requires_success_envelope_and_direct_https_image_link() {
+        assert_eq!(
+            parse_imgur_response(
+                r#"{"success":true,"status":200,"data":{"link":"https://i.imgur.com/abc123.png"}}"#
+            )
+            .unwrap(),
+            "https://i.imgur.com/abc123.png"
+        );
+        assert!(parse_imgur_response(
+            r#"{"success":false,"status":200,"data":{"link":"https://i.imgur.com/abc123.png"}}"#
+        )
+        .is_err());
+        assert!(parse_imgur_response(
+            r#"{"success":true,"status":400,"data":{"link":"https://i.imgur.com/abc123.png"}}"#
+        )
+        .is_err());
+
+        for link in [
+            "http://i.imgur.com/abc123.png",
+            "https://i.imgur.com.evil.test/abc123.png",
+            "https://i.imgur.com@evil.test/abc123.png",
+            "https://i.imgur.com/../abc123.png",
+            "https://i.imgur.com/abc123.png?redirect=evil",
+            "https://i.imgur.com/abc123.txt",
+        ] {
+            let body = serde_json::json!({
+                "success": true,
+                "status": 200,
+                "data": {"link": link}
+            })
+            .to_string();
+            assert!(parse_imgur_response(&body).is_err(), "{link}");
+        }
+    }
 }

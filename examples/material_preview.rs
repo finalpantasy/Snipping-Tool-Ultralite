@@ -146,6 +146,7 @@ fn main() {
         }
         home.workflow.upload_host = Default::default();
         home.workflow.auto_save = true;
+        home.history_enabled = true;
         home.workflow.confirm_upload = true;
         home.menu = Menu::Options;
         let mut on = Pixmap::new(WIDTH, HEIGHT).unwrap();
@@ -256,6 +257,14 @@ fn main() {
                 .unwrap();
         }
         settings.active_tab = 0;
+        settings.save_error =
+            Some("Could not save settings. Check folder access and retry.".into());
+        let mut error_frame = Pixmap::new(WIN_W, WIN_H).unwrap();
+        settings.draw(&mut error_frame);
+        composite(&error_frame)
+            .save_png(out.join(format!("{name}-settings-save-error.png")))
+            .unwrap();
+        settings.save_error = None;
         for exit in [false, true] {
             settings.config.general.quit_on_close = exit;
             let mut frame = Pixmap::new(WIN_W, WIN_H).unwrap();

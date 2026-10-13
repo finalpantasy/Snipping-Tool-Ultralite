@@ -46,7 +46,59 @@ fn kind(a: &Annotation) -> SizeKind {
     }
 }
 impl OverlayState {
+    /// Complete a move before another command can change annotation indices.
+    pub fn finish_annotation_drag(&mut self) {
+        if let Some((i, old)) = self.pre_drag_annotation.take() {
+            if self.annotations.get(i).is_some_and(|a| *a != old) {
+                tools::record_undo(
+                    &mut self.undo_stack,
+                    &mut self.redo_stack,
+                    UndoAction::Modify(i, old),
+                );
+            }
+        }
+        self.select_drag_start = None;
+        self.resize_handle = None;
+    }
+
+    pub fn cancel_annotation_drag(&mut self) {
+        if let Some((i, old)) = self.pre_drag_annotation.take() {
+            if let Some(annotation) = self.annotations.get_mut(i) {
+                *annotation = old;
+            }
+        }
+        self.select_drag_start = None;
+        self.resize_handle = None;
+    }
+
+    pub fn undo_annotation(&mut self) -> bool {
+        self.finish_annotation_drag();
+        let changed = tools::apply_undo(
+            &mut self.annotations,
+            &mut self.undo_stack,
+            &mut self.redo_stack,
+        );
+        self.selected_index = None;
+        self.sync_step_counter();
+        changed
+    }
+
+    pub fn redo_annotation(&mut self) -> bool {
+        self.finish_annotation_drag();
+        let changed = tools::apply_redo(
+            &mut self.annotations,
+            &mut self.undo_stack,
+            &mut self.redo_stack,
+        );
+        self.selected_index = None;
+        self.sync_step_counter();
+        changed
+    }
+
     pub fn size_kind(&self) -> SizeKind {
+        if self.text_input_active {
+            return SizeKind::Text;
+        }
         self.selected_index
             .and_then(|i| self.annotations.get(i))
             .map(kind)
@@ -135,6 +187,7 @@ impl OverlayState {
         if i >= self.annotations.len() {
             return false;
         }
+        self.finish_annotation_drag();
         let removed = self.annotations.remove(i);
         let mut undo = Vec::new();
         let mut number = 1;

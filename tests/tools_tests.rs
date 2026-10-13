@@ -5,6 +5,50 @@ use snipping_tool_ul::tools::{
 };
 
 #[test]
+fn pixelation_export_preserves_block_averages_and_clips_oversized_regions() {
+    let source: Vec<u8> = (0..35).flat_map(|i| [i * 5, i * 3, i, 255]).collect();
+    for size in [Size::new(6., 4.), Size::new(1.0e20, 1.0e20)] {
+        let mut frame = tiny_skia::Pixmap::new(7, 5).unwrap();
+        let ann = Annotation::Pixelate {
+            top_left: Point::new(1., 1.),
+            size,
+            block_size: 3,
+        };
+        render_annotation(&ann, &mut frame, Some(&source), Some(7));
+        for y in 0..5usize {
+            for x in 0..7usize {
+                let actual = &frame.data()[(y * 7 + x) * 4..(y * 7 + x + 1) * 4];
+                if x == 0 || y == 0 {
+                    assert_eq!(actual, &[0; 4]);
+                    continue;
+                }
+                let bx = 1 + ((x - 1) / 3) * 3;
+                let by = 1 + ((y - 1) / 3) * 3;
+                let mut sum = [0u32; 3];
+                let mut count = 0;
+                for sy in by..(by + 3).min(5) {
+                    for sx in bx..(bx + 3).min(7) {
+                        for c in 0..3 {
+                            sum[c] += source[(sy * 7 + sx) * 4 + c] as u32;
+                        }
+                        count += 1;
+                    }
+                }
+                assert_eq!(
+                    actual,
+                    &[
+                        (sum[0] / count) as u8,
+                        (sum[1] / count) as u8,
+                        (sum[2] / count) as u8,
+                        255
+                    ]
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn rectangle_produces_annotation() {
     let mut tool = RectangleTool::new(Color::red(), 3.0);
     tool.on_mouse_down(Point::new(10.0, 10.0));
@@ -126,11 +170,9 @@ fn arrowhead_points_geometry() {
     // Tip should be at the end point
     assert_eq!(points[0], end);
     // The other two points should be behind the tip and symmetric about the shaft
-    // Side length = 4 * thickness = 12, half-angle = 30 degrees
-    // Back distance along shaft = 12 * cos(30°) ≈ 10.392
-    // Perpendicular offset = 12 * sin(30°) = 6.0
-    let back_dist = 12.0_f32 * (std::f32::consts::PI / 6.0).cos();
-    let perp_offset = 12.0_f32 * (std::f32::consts::PI / 6.0).sin();
+    // Broad head: 12 px long and 18 px wide for a 3 px stroke.
+    let back_dist = 12.0_f32;
+    let perp_offset = 9.0_f32;
     assert!((points[1].x - (100.0 - back_dist)).abs() < 0.01);
     assert!((points[1].y - perp_offset).abs() < 0.01);
     assert!((points[2].x - (100.0 - back_dist)).abs() < 0.01);

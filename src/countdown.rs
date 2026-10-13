@@ -17,6 +17,7 @@ pub struct Countdown {
     surface: softbuffer::Surface<Arc<Window>, Arc<Window>>,
     remaining: u32,
     next_tick: Instant,
+    deadline: Instant,
 }
 
 impl Countdown {
@@ -43,7 +44,10 @@ impl Countdown {
             .with_position(winit::dpi::PhysicalPosition::new(x, y))
             .with_decorations(false)
             .with_window_level(WindowLevel::AlwaysOnTop)
-            .with_resizable(false);
+            .with_resizable(false)
+            // A delayed capture exists to grab menus and tooltips; taking focus
+            // would dismiss them and deactivate the window being captured.
+            .with_active(false);
 
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Arc::new(w),
@@ -69,11 +73,14 @@ impl Countdown {
             }
         };
 
+        let started = Instant::now();
+        let deadline = started + Duration::from_secs(seconds as u64);
         let mut cd = Self {
             window,
             surface,
             remaining: seconds,
-            next_tick: Instant::now() + Duration::from_secs(1),
+            next_tick: (started + Duration::from_secs(1)).min(deadline),
+            deadline,
         };
         cd.render();
         Some(cd)
@@ -94,9 +101,10 @@ impl Countdown {
         if now < self.next_tick {
             return false;
         }
-        self.remaining = self.remaining.saturating_sub(1);
+        let (remaining, next_tick) = countdown_at(self.deadline, now);
+        self.remaining = remaining;
+        self.next_tick = next_tick;
         if self.remaining > 0 {
-            self.next_tick = Instant::now() + Duration::from_secs(1);
             self.render();
             false
         } else {
@@ -166,5 +174,35 @@ impl Countdown {
         }
         // No request_redraw here: tick() renders once per second, and a
         // redraw request from inside render() would loop for the whole delay.
+    }
+}
+
+/// Derive display/wake state from elapsed time, never from the number of wakeups.
+fn countdown_at(deadline: Instant, now: Instant) -> (u32, Instant) {
+    let left = deadline.saturating_duration_since(now);
+    let remaining = (left.as_secs() + u64::from(left.subsec_nanos() != 0)) as u32;
+    let next = deadline - Duration::from_secs(remaining.saturating_sub(1) as u64);
+    (remaining, next)
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+    #[test]
+    fn delayed_wakeup_catches_up_without_extending_capture_delay() {
+        let start = Instant::now();
+        let deadline = start + Duration::from_secs(3);
+        assert_eq!(
+            countdown_at(deadline, start + Duration::from_millis(1800)),
+            (2, start + Duration::from_secs(2))
+        );
+        assert_eq!(
+            countdown_at(deadline, start + Duration::from_secs(3)),
+            (0, deadline)
+        );
+        assert_eq!(
+            countdown_at(deadline, start + Duration::from_secs(7)),
+            (0, deadline)
+        );
     }
 }

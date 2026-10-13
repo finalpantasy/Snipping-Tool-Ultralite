@@ -229,9 +229,10 @@ fn organized_controls_remain_reachable_at_minimum_size_with_no_overlap() {
     }
     ui.header.menu = Menu::Options;
     let targets = ui.header.menu_targets(660.);
+    assert_eq!(targets.first().unwrap().action, Action::History);
     assert!(targets.last().unwrap().rect.y + 32. < snipping_tool_ul::launcher::HEIGHT as f32);
     assert_eq!(
-        ui.hit(Point::new(400., 150.), 660., 390., &o),
+        ui.hit(Point::new(400., 180.), 660., 390., &o),
         Some(Action::Dismiss)
     );
     for t in targets {

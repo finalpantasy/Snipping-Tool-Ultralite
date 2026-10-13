@@ -86,6 +86,7 @@ pub struct Model {
     pub mode: CaptureMode,
     pub delay: u32,
     pub workflow: WorkflowConfig,
+    pub history_enabled: bool,
     pub has_image: bool,
     pub connected: bool,
     pub connecting: bool,
@@ -103,6 +104,7 @@ impl Model {
             mode: CaptureMode::Region,
             delay: 0,
             workflow,
+            history_enabled: false,
             has_image: false,
             connected: false,
             connecting: false,
@@ -181,29 +183,16 @@ impl Model {
                 ),
             ],
             Menu::Options => [
-                Action::Preview,
-                Action::AutoSave,
-                Action::ConfirmUpload,
-                Action::Connect,
-                Action::History,
-                Action::Settings,
-                Action::Quit,
+                (Action::History, 79.),
+                (Action::Preview, 111.),
+                (Action::AutoSave, 143.),
+                (Action::ConfirmUpload, 199.),
+                (Action::Connect, 231.),
+                (Action::Settings, 287.),
+                (Action::Quit, 323.),
             ]
             .iter()
-            .enumerate()
-            .map(|(i, a)| {
-                Target::new(
-                    w - 350.,
-                    if *a == Action::Quit {
-                        323.
-                    } else {
-                        79. + i as f32 * 32. + (i / 2) as f32 * 24.
-                    },
-                    332.,
-                    32.,
-                    *a,
-                )
-            })
+            .map(|(a, y)| Target::new(w - 350., *y, 332., 32., *a))
             .collect(),
             _ => Vec::new(),
         }
@@ -457,7 +446,7 @@ impl Model {
             1.0,
         );
         if self.menu == Menu::Options {
-            for (label, y) in [("Capture", 60.), ("Sharing", 148.), ("App", 236.)] {
+            for (label, y) in [("Capture", 60.), ("Sharing", 180.), ("App", 268.)] {
                 c.label(first.x + 12., y, label, 11., ui::muted());
             }
             c.round(
@@ -594,6 +583,24 @@ impl Model {
                     ui::muted(),
                 );
             } else if t.action == Action::Settings || t.action == Action::History {
+                if t.action == Action::History {
+                    let r = Rect::new(t.rect.x + t.rect.w - 122., t.rect.y + 6., 94., 20.);
+                    c.round(r, 6., crate::theme::bg_3(), 1.);
+                    c.centered_in(
+                        r,
+                        if self.history_enabled {
+                            "Currently on"
+                        } else {
+                            "Currently off"
+                        },
+                        11.,
+                        if self.history_enabled {
+                            ui::focus_color()
+                        } else {
+                            ui::muted()
+                        },
+                    );
+                }
                 c.icon(
                     "right",
                     t.rect.x + t.rect.w - 23.,

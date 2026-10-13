@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.3.15 preview
+
+- Keep one active History copy and only the newest pending request, instead of decoding obsolete images in parallel.
+- Transfer RGBA image storage without cloning it; reject oversized History images before allocating full pixel buffers.
+- Make clipboard admission cancellable and bound all Quit stages with one shared deadline.
+- Retain native OCR image ownership and the single-flight lease until Windows reports a terminal state, including status-query failures.
+- Publish real capture and annotation screenshots, a short native UI demo, and a portable Windows preview.
+
+## 0.3.14 preview
+
+- Prepare ordinary PNG History thumbnails a row at a time, cancel obsolete refresh work and keep only one active loader plus the newest pending request. Preserve full-resolution clipboard copies.
+- Reduce repeated opaque zoom and pixelation rendering work without adding image buffers; include pending History copies in graceful shutdown.
+- Integrate direct Windows OCR with supervised cancellation and timeout handling, avoiding the per-request PowerShell bridge.
+- Include coordinated annotation, settings, history, upload and installer reliability fixes verified by the headless regression suite.
+
+- Freeze the desktop when selection starts, then copy the selected pixels from that same snapshot. Region and window selection show a still image; full-screen capture reuses the snapshot. Timers freeze after the countdown.
+- Draw the snapshot without another full-screen CPU pixel copy, release it after selection/cancellation, and report allocation/display failures. Include layered windows already visible at capture time.
+
+## 0.3.13 preview
+
+- Replace the tray About notification with an on-demand themed window containing the logo, version and license information. Reopening About focuses the existing window; Close, X and Escape dismiss only About.
+- Add an offline Windows Sandbox preparation kit with an isolated results folder, read-only app input and host clipboard/device sharing disabled. It prepares files only; Sandbox enablement and native workflow acceptance remain pending.
+- Verify the minimum Rust 1.89 toolchain and exercise home/About native presentation on a guarded private desktop, keeping the user's working desktop untouched.
+
+## 0.3.12 preview
+
+- Move Capture history to the top of Options and show Currently off/on. Load history thumbnails in the background and preserve PNG/JPEG/WebP formats with collision-safe, complete-file publication.
+- Reuse unchanged annotated viewport pixels with bounded metadata; accelerate pixelation export with direct pixel fills and clip oversized regions to the source image.
+- Keep Settings open with an explanation when saving fails. Preserve the working hotkey if a replacement fails, pending clipboard work when capture is cancelled, and the selected capture mode after a tray window capture.
+- Schedule the earliest timer/render deadline so an idle branch cannot erase countdown ticks. Close startup registry handles on failures and clean partial OCR temporary files.
+- Remove full-image copies from OCR/pin encoding and allow longer bounded upload writes on slow connections. Declare Rust 1.89 to match the resolved Windows dependency requirement.
+
+## 0.3.11 preview
+
+- Render Capture History text, borders and thumbnails at native display resolution instead of stretching a 600 x 400 image. Refresh on display scaling changes while retaining logical click targets.
+- Explain when history is off versus enabled but empty. History remains optional, stores up to 20 images locally and is separate from Auto-save.
+- Isolate history storage tests in a temporary directory so pruning never touches the user's saved images.
+
+## 0.3.10 preview
+
+- Start a new editor capture after releasing New, and ignore leftover mouse releases in the picker, so one click starts a new selection.
+- Speed up edited zoom with precomputed bilinear coordinates, a 1 MiB pixelation color cache, and visible-pixel drawing instead of millions of block rectangles. Original capture/export pixels stay unchanged.
+- Space recenters and fits the image only with Select active, outside text entry, menus and active drags. Show the shortcut in the Select hint.
+
+## 0.3.9 preview
+
+- Give arrows broader heads and clean pointed tips at every stroke width. Draw one silhouette so the shaft cannot protrude through the head or darken translucent joins.
+- Keep short arrowheads within the arrow length, and include the full head in selection bounds and click targets.
+
 ## 0.3.8 preview
 
 - Add Catbox, Freeimage.host and four temporary Litterbox expiry choices in a no-setup host picker, with public-upload disclosures and expiring link reuse.

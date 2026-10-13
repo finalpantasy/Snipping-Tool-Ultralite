@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Executable=(Join-Path $PSScriptRoot '..\snipping-tool-ul.exe'),
-    [string]$Version='0.3.8',
+    [string]$Version='0.3.15',
     [string]$NoticeFolder='',
     [switch]$ReplaceWindowsSnippingTool,
     [switch]$Apply,
@@ -39,6 +39,33 @@ if($Interactive){
     $form.Controls.AddRange(@($label,$check,$detail,$install,$cancel)); $form.AcceptButton=$install; $form.CancelButton=$cancel
     try{if($form.ShowDialog() -ne [Windows.Forms.DialogResult]::OK){Write-Output 'Installation cancelled.'; return}; $ReplaceWindowsSnippingTool=[bool]$check.Checked}finally{$form.Dispose()}
 }
+# Carry an existing opt-in forward when moving between versioned folders.
+# Never enable startup for a new install or replace a portable/custom command.
+$startupKey='HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$startupName='Snipping Tool UL'
+$startupValue=Get-ItemProperty -LiteralPath $startupKey -Name $startupName -ErrorAction SilentlyContinue
+$startupCommand=if($null -ne $startupValue){$startupValue.$startupName}else{$null}
+$updateStartup=$false
+function Get-NormalizedFilesystemPath([string]$value){
+    if([string]::IsNullOrWhiteSpace($value)){return $null}
+    try{
+        if(![IO.Path]::IsPathRooted($value)){return $null}
+        return [IO.Path]::GetFullPath($value)
+    }catch{return $null}
+}
+function Test-OwnedInstallExecutable([string]$value){
+    $normalized=Get-NormalizedFilesystemPath $value
+    if([string]::IsNullOrEmpty($normalized)){return $false}
+    $ownedPrefix=$root+[IO.Path]::DirectorySeparatorChar
+    return $normalized.StartsWith($ownedPrefix,[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($normalized) -eq 'snipping-tool-ul.exe'
+}
+if($startupCommand -is [string] -and $startupCommand -match '^"([^"]+)" --background$'){
+    $startupExe=Get-NormalizedFilesystemPath $Matches[1]
+    if($startupExe -and $startupExe.StartsWith($root+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){
+        $relativeStartup=$startupExe.Substring($root.Length+1)
+        $updateStartup=$relativeStartup -match '^\d+\.\d+\.\d+\\snipping-tool-ul\.exe$'
+    }
+}
 $shortcutName=if($ReplaceWindowsSnippingTool){'Snipping Tool.lnk'}else{'Snipping Tool UL.lnk'}
 $shortcutPath=Join-Path $programs $shortcutName
 $hash=(Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
@@ -46,10 +73,20 @@ $noticeFiles=@('LICENSE','THIRD_PARTY_NOTICES.md','assets\OpenSans-OFL.txt','ass
 foreach($name in $noticeFiles){if(!(Test-Path -LiteralPath (Join-Path $NoticeFolder $name))){throw 'License notices are missing. Install from the full package.'}}
 $shell=New-Object -ComObject WScript.Shell
 try{
+    $replacementMode=[bool]$ReplaceWindowsSnippingTool
+    if(!$replacementMode){
+        $replacementPath=Join-Path $programs 'Snipping Tool.lnk'
+        if(Test-Path -LiteralPath $replacementPath){
+            $replacementLink=$shell.CreateShortcut($replacementPath)
+            if(Test-OwnedInstallExecutable $replacementLink.TargetPath){
+                $replacementMode=$true
+                $shortcutPath=$replacementPath
+            }
+        }
+    }
     $link=$shell.CreateShortcut($shortcutPath)
     if(Test-Path -LiteralPath $shortcutPath){
-        $previous=[IO.Path]::GetFullPath($link.TargetPath)
-        if(!$previous.StartsWith($root+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($previous) -ne 'snipping-tool-ul.exe'){throw 'An unrelated Start shortcut has this name. It was preserved.'}
+        if(!(Test-OwnedInstallExecutable $link.TargetPath)){throw 'An unrelated Start shortcut has this name. It was preserved.'}
     }
     if(Test-Path -LiteralPath $target){
         if((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne $hash){throw 'This release folder contains a different executable. Choose a new release version.'}
@@ -68,7 +105,7 @@ try{
     $verified=$shell.CreateShortcut($shortcutPath)
     if($verified.TargetPath -ne $target -or !(Test-Path -LiteralPath $shortcutPath)){throw 'Start shortcut verification failed.'}
     # The replacement is already usable before the Windows app is removed.
-    $removed=$false
+    $removed=$replacementMode
     if($ReplaceWindowsSnippingTool){
         $packages=@(Get-AppxPackage -Name Microsoft.ScreenSketch)
         foreach($package in $packages){
@@ -77,19 +114,31 @@ try{
         }
         if(@(Get-AppxPackage -Name Microsoft.ScreenSketch).Count -ne 0){throw 'Microsoft Snipping Tool is still registered. UL is installed, but takeover is incomplete.'}
         $removed=$true
+    }
+    if($replacementMode){
         $oldShortcut=Join-Path $programs 'Snipping Tool UL.lnk'
         if(Test-Path -LiteralPath $oldShortcut){
             $oldLink=$shell.CreateShortcut($oldShortcut)
-            $oldTarget=[IO.Path]::GetFullPath($oldLink.TargetPath)
-            if($oldTarget.StartsWith($root+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($oldTarget) -eq 'snipping-tool-ul.exe'){
+            if(Test-OwnedInstallExecutable $oldLink.TargetPath){
                 Remove-Item -LiteralPath $oldShortcut
             }
+        }
+    }
+    if($updateStartup){
+        # Honor an opt-out or custom target chosen while installation ran.
+        $currentStartup=Get-ItemProperty -LiteralPath $startupKey -Name $startupName -ErrorAction SilentlyContinue
+        if($null -ne $currentStartup -and $currentStartup.$startupName -eq $startupCommand){
+            $newStartupCommand='"'+$target+'" --background'
+            Set-ItemProperty -LiteralPath $startupKey -Name $startupName -Value $newStartupCommand -Type String -ErrorAction Stop
+            $verifiedStartup=Get-ItemProperty -LiteralPath $startupKey -Name $startupName -ErrorAction Stop
+            if($verifiedStartup.$startupName -ne $newStartupCommand){throw 'Startup update verification failed.'}
         }
     }
     $state=[ordered]@{version=$Version;executable=$target;sha256=$hash;shortcut=$shortcutPath;replacesWindows=$removed;restoreMicrosoft='https://apps.microsoft.com/detail/9mz95kl8mr0l'}
     $state | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'integration-state.json') -Encoding UTF8
     $state | ConvertTo-Json -Compress
 }finally{
+    if($replacementLink){[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($replacementLink)}
     if($oldLink){[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($oldLink)}
     if($verified){[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($verified)}
     if($link){[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($link)}

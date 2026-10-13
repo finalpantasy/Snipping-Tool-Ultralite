@@ -87,6 +87,19 @@ impl Default for EditorView {
     }
 }
 impl EditorView {
+    /// Space only recenters a quiescent Select tool, never typing or dragging.
+    pub fn recenter_for_select(&mut self, state: &crate::state::OverlayState) -> bool {
+        if state.active_tool != crate::tools::ToolKind::Select
+            || state.text_input_active
+            || state.select_drag_start.is_some()
+            || state.resize_handle.is_some()
+            || self.is_panning()
+        {
+            return false;
+        }
+        *self = Self::default();
+        true
+    }
     pub fn begin_pan(&mut self, x: f64, y: f64, vw: u32, vh: u32, dpi: f64) -> bool {
         if !x.is_finite() || !y.is_finite() || !dpi.is_finite() || dpi <= 0. {
             return false;

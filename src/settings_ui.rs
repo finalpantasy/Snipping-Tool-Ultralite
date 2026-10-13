@@ -95,10 +95,14 @@ pub struct SettingsUi {
     pub editing_shortcut: Option<usize>,
     /// True while waiting for the user to press the new global-hotkey combo.
     pub editing_hotkey: bool,
+    /// True once config.toml was written by this window, even if a later
+    /// step (startup registration) failed and kept the window open.
+    pub saved: bool,
     /// Active tab index: 0=General, 1=Shortcuts, 2=Tools, 3=Windows.
     pub active_tab: usize,
     pub integration_pending: bool,
     pub integration_status: String,
+    pub save_error: Option<String>,
     /// Index of the currently hovered hit rect (for redraw optimization).
     hovered: Option<usize>,
     /// Pending result channel for the async folder-picker dialog.
@@ -407,10 +411,12 @@ impl SettingsUi {
             cursor_pos: (0.0, 0.0),
             editing_shortcut: None,
             editing_hotkey: false,
+            saved: false,
             hovered: None,
             active_tab: 0,
             integration_pending: false,
             integration_status: String::new(),
+            save_error: None,
             browse_rx: None,
             autostart: None,
         }
@@ -492,6 +498,11 @@ impl SettingsUi {
             }
         }
         p.footer();
+        if let Some(error) = &self.save_error {
+            let r = Rect::new(LEFT, WIN_H as f32 - 96., WIN_W as f32 - LEFT * 2., 32.);
+            p.c.round(r, 6., theme::bg_3(), 1.);
+            p.c.centered_in(r, error, 11., theme::text_normal());
+        }
         self.hit_rects = hits;
         self.needs_redraw = false;
     }
@@ -599,13 +610,25 @@ impl SettingsUi {
                 false
             }
             Action::SaveClose => {
+                self.save_error = None;
                 if let Err(e) = self.config.save() {
                     tracing::error!("Failed to save config: {e}");
+                    self.save_error =
+                        Some("Could not save settings. Check folder access and retry.".into());
+                    self.needs_redraw = true;
+                    return false;
                 }
+                self.saved = true;
                 if let Some(want) = self.autostart {
-                    if want != crate::autostart::is_enabled() {
+                    // Always rewrite when enabling: the Run value may still point
+                    // at a previous version's folder after an upgrade.
+                    if want || crate::autostart::is_enabled() {
                         if let Err(e) = crate::autostart::set_enabled(want) {
                             tracing::error!("Auto-start toggle failed: {e}");
+                            self.save_error =
+                                Some("Settings saved; startup change failed. Please retry.".into());
+                            self.needs_redraw = true;
+                            return false;
                         }
                     }
                 }

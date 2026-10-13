@@ -177,21 +177,25 @@ impl Toolbar {
     }
 
     /// Position the toolbar centered below (or above) the selection.
-    pub fn position_for(selection: &Selection, screen_height: f32) -> Self {
-        Self::position_for_dynamic(selection, screen_height, BUTTON_COUNT)
+    pub fn position_for(selection: &Selection, screen_width: f32, screen_height: f32) -> Self {
+        Self::position_for_dynamic(selection, screen_width, screen_height, BUTTON_COUNT)
     }
 
     /// Position the toolbar with a dynamic button count.
     pub fn position_for_dynamic(
         selection: &Selection,
+        screen_width: f32,
         screen_height: f32,
         visible_count: usize,
     ) -> Self {
         let width = Self::toolbar_width_dynamic(visible_count);
         let height = TOOLBAR_HEIGHT;
 
-        // Center horizontally on the selection, clamped to screen bounds
-        let x = (selection.x + (selection.width - width) / 2.0).max(0.0);
+        // Center horizontally on the selection, clamped to both screen edges so
+        // the trailing buttons stay reachable for a selection near the right.
+        let x = (selection.x + (selection.width - width) / 2.0)
+            .min(screen_width - width)
+            .max(0.0);
 
         // Place below the selection by default
         let below_y = selection.y + selection.height + TOOLBAR_PADDING;

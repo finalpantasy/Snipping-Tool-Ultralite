@@ -1,61 +1,64 @@
-<p align="center"><img src="assets/ul-icon.png" width="96" alt="Teal diving bird with scissor wings"></p>
+<p align="center"><img src="assets/ul-icon.png" width="88" alt="Snipping Tool UL teal bird and scissors logo"></p>
 
-# Snipping Tool UL
+<h1 align="center">Snipping Tool UL</h1>
+<p align="center"><strong>Ultralight in performance, not features.</strong><br>A lightweight native Rust snipping tool for Windows 11.</p>
 
-**Ultralight in performance, not features.** A native Rust screenshot tool for Windows 11. Select a region, copy immediately, then annotate in the preview that opens automatically.
+<p align="center"><a href="https://github.com/finalpantasy/Snipping-Tool-UL/releases/download/v0.3.15-preview/Snipping-Tool-UL-0.3.15-Windows-x64.zip"><strong>Download Windows preview</strong></a> · <a href="https://finalpantasy.github.io/Snipping-Tool-UL/">Product page & video</a> · <a href="docs/USAGE.md">User guide</a> · <a href="LICENSE">MIT license</a></p>
 
-Local preview build; GitHub publication is pending. [Verification and limits](docs/VERIFICATION-0.3.8.md)
+![The real UL editor on Windows 11, showing a fictional captured project brief](docs/media/editor-dark.png)
 
-The editor images below are actual UI code rendered headlessly with synthetic content, not screenshots of a native Windows capture session. Working-media evidence is still required before publication.
+Take a snip. It is copied immediately, and the preview opens automatically. Paste it into a conversation or keep editing without another button click.
 
-![Dark frosted editor](docs/images/editor-dark.png)
-![Light frosted editor](docs/images/editor-light.png)
+**Native Rust. No webview. No permanent render loop.** Teal frosted controls, a themed title bar, and dark mode by default.
 
-## Capture and edit
+## See it
 
-- Region, window and full-screen capture; configurable hotkeys and 3/5/10-second timers.
-- Image clipboard output for pasting into chats. Copy updates annotations without closing the preview.
-- Middle-mouse drag pans the image; pointer-centered wheel zoom scales it. Ctrl+0 resets the view. Export keeps the original resolution.
-- Smooth pencil strokes, arrows, shapes, word highlights, pixelation, text and numbered steps.
-- Live width and size controls: slider, numeric box and minus/plus buttons. Arrowheads scale with width.
-- Text uses Open Sans, with a visible size control. Ordinary scrolling stays zoom.
-- **Select** (V) selects annotations to move, resize or change; it does not pan the image. Click targets keep a consistent screen size at any zoom. Right-click a numbered step to delete it; later steps renumber. Undo restores the whole change.
-- Save, OCR, pin on screen, optional history and auto-save. History and auto-save are off by default.
-- Light and dark frosted surfaces with a themed native title bar, clear tool labels and hover/focus help.
+[![Watch the 32-second native UI product tour](docs/media/demo-poster.png)](https://finalpantasy.github.io/Snipping-Tool-UL/#demo)
 
-No webview or permanent render loop. Preview editing caches visible capture pixels and draws annotations at viewport resolution; saving and copying render original-resolution output separately.
+[Watch the tour](https://finalpantasy.github.io/Snipping-Tool-UL/#demo) · [Download MP4](docs/media/Snipping-Tool-UL-demo.mp4)
 
-## Portable use and Windows integration
+Screenshots and tour use the real Windows app with a fictional sample brief. The tour uses captions, crops and cuts to show the interface; it does not simulate UI actions. Capture, automatic clipboard copy and wheel zoom were exercised during recording. See [media provenance](docs/MEDIA.md).
 
-Extract the ZIP and launch `snipping-tool-ul.exe`. Closing home leaves the tray and hotkey active. Left-click the tray to reopen home; **Quit** exits. Default capture hotkey: **Ctrl+Shift+S**, configurable in Settings. `--background` starts in the tray.
+## The essentials, within reach
 
-**Options > Quit Snipping Tool UL** exits the app completely. In **Settings > General > When closing**, choose **Keep in tray** (default) or **Quit completely** for the home/editor X button. Save & Close applies the choice; closing a settings or countdown dialog retains its usual dialog behavior.
+| Capture | Edit | Keep and share |
+| --- | --- | --- |
+| Region, window, full screen | Pencil, arrows, shapes, highlights | Immediate image clipboard copy |
+| Frozen snapshot during selection | Text, pixelation, numbered steps | Save at original resolution |
+| Configurable hotkeys | Live width and size controls | Explicit one-click public image links |
+| 3, 5 or 10-second timers | Undo, redo, pointer-centered zoom | Optional history and auto-save |
+| Windows Start integration | Middle-mouse pan, local OCR | Pin screenshots on screen |
 
-In **Settings > Windows**, choose **Use as my Snipping Tool** and confirm. This installs UL for your account, verifies its executable and Start shortcut, and removes Microsoft's Snipping Tool registration for that account. UL's Start entry becomes **Snipping Tool**. Windows controls indexing; inbox updates may restore Microsoft's app. Windows' reserved Win+Shift+S shortcut is not remapped.
+Catbox, Freeimage.host and temporary Litterbox sharing need no account or personal API key. Uploading is an explicit action, with an optional confirmation and five-second cooldown. An unchanged image reuses its recent successful link. These are public links; [read the hosting details](docs/UPLOAD-HOSTS.md).
 
-The installer offers an unchecked replacement checkbox:
+<details>
+<summary>Home keeps capture controls together</summary>
 
-```powershell
-./snipping-tool-ul.exe install --apply --interactive
-```
+![Real UL home window with New, capture mode, Delay and Options](docs/media/home-dark.png)
 
-`install` alone previews the plan. Installation without replacement keeps Microsoft and adds **Snipping Tool UL** alongside it. No administrator access or startup change is needed. **Restore Microsoft from Store** opens its official Store page. Unrelated shortcuts and conflicting installed files are preserved; errors are reported.
+</details>
 
-After updating, **Quit UL from its tray and reopen Snipping Tool** to load the new executable.
+## Start using it
 
-## One-click sharing
+1. [Download the Windows x64 ZIP](https://github.com/finalpantasy/Snipping-Tool-UL/releases/download/v0.3.15-preview/Snipping-Tool-UL-0.3.15-Windows-x64.zip) and extract it.
+2. Launch `snipping-tool-ul.exe`.
+3. Choose **New** or press **Ctrl+Shift+S**.
 
-Choose **Options > Image host** once, then click **Upload** to copy a direct PNG link. Catbox is the default; Freeimage.host and temporary Litterbox are also available. Litterbox offers 1 hour, 12 hours, 1 day or 3 days. Freeimage.host uploads may appear on its public website. No account or API key is needed. These are public links; anonymous uploads have no in-app deletion control. Catbox retains files under its service rules. Direct PNG links match RES's generic image handler for inline viewing on old Reddit; subreddit rules and availability vary. See [Catbox's API](https://catbox.moe/tools.php), [retention policy](https://catbox.moe/faq.php), and [RES's handler](https://github.com/honestbleeps/Reddit-Enhancement-Suite/blob/master/lib/modules/hosts/defaultImage.js).
+Portable use needs no installer. **Options > Quit Snipping Tool UL** exits completely. Choose **Keep in tray** or **Quit completely** for the X button in Settings. History and auto-save are off by default.
 
-Uploads happen only when clicked. Failed uploads preserve the image for retry. New upload attempts are spaced at least five seconds apart; failed attempts also count. Copying a cached link stays immediate. There are no app-imposed hourly or daily caps. This cooldown is per running session, not a host-side abuse limit. Turn on **Options > Confirm before uploading** for an explicit **Upload publicly / Cancel** prompt. Repeated uploads of an unchanged image copy its existing link. The in-memory cache holds eight recent successful images and destinations, including links whose clipboard copy failed; closing the app clears it. Editing an image requires a new upload. The link cache distinguishes hosts and expiry choices, and stops reusing expired Litterbox links. Freeimage.host supplies a shared public application key automatically; no user credentials are requested. See [hosting policies and API details](docs/UPLOAD-HOSTS.md). Live uploads and Reddit viewing have not yet been exercised in this preview.
+Optional **Settings > Windows > Use as my Snipping Tool** installs for your account and can replace Microsoft's Snipping Tool entry in Start. The installer explains and confirms the replacement. Windows' reserved Win+Shift+S shortcut is not remapped. [Setup and usage guide](docs/USAGE.md)
 
-**Auto-save** is off by default. Turn it on in Options to save each original capture as a PNG in **Pictures > Snipping Tool UL**. Change its folder in **Settings > General > Auto-save folder > Change**. Missing custom folders are created; unavailable destinations report an error instead of silently using another folder. Manual **Save** always opens a filename chooser and saves the current annotations separately. Image rendering and encoding happen after choosing a path, so cancelling avoids that work. Native Windows dialog latency has not been measured in this preview.
+## Small by design, measured honestly
 
-Settings: `%AppData%/snipping-tool-ul/config.toml`. Optional history: `%LocalAppData%/snipping-tool-ul/history`. `SNIPPING_TOOL_UL_CONFIG_DIR` redirects both for isolated testing.
+History image copying now keeps one active preparation and only the newest pending request. Generated-image measurements reduced requested Rust heap peak from **63.28 to 31.92 MiB at 4K**, and **253.13 to 126.84 MiB at 8K**, while keeping original pixels.
 
-## Development
+Two 1,000-call native 4K OCR traces kept live Rust allocations and OS handles flat after warm-up. Windows cache memory still fluctuates. These are component measurements, not total app RAM or a speed comparison against Windows Snipping Tool. [Memory investigation](docs/LEAK-INVESTIGATION-2026-10-13.md)
 
-Use current stable Rust with the Windows MSVC toolchain:
+**0.3.15 is a preview.** The release passed 321 automated tests, plus native OCR lifecycle checks. Broader native workflows, mixed-monitor acceptance, live image-host uploads and a full interactive leak soak remain open. [Release verification](docs/VERIFICATION-0.3.15.md)
+
+## Build and contribute
+
+Windows MSVC Rust toolchain, Rust 1.89 or newer:
 
 ```powershell
 cargo fmt --all -- --check
@@ -64,8 +67,6 @@ cargo test --locked
 ./scripts/Build-Portable.ps1
 ```
 
-Portable builds remap build-user paths. `-Examples headless_bench` adds the CPU benchmark helper. `cargo run --example editing_preview` and `cargo run --example settings_preview` render actual UI code with synthetic images, without windows, capture, clipboard writes or uploads. Set `SNIPPING_TOOL_UL_CONFIG_DIR` to an isolated test directory.
+Portable builds remap machine-specific build paths. Tests use generated content; native GUI checks require isolation or explicit user authorization. Please include your Windows version, display scale and a reproducible sequence in [bug reports](https://github.com/finalpantasy/Snipping-Tool-UL/issues).
 
-Native capture/paste, hotkeys/timers, mixed-monitor behavior, active glass appearance and full-app memory/latency still require isolated Windows acceptance. [Verification](docs/VERIFICATION-0.3.0.md) separates measured evidence from those gaps.
-
-This standalone repository derives from MIT-licensed [HydroShot](https://github.com/Real-Fruit-Snacks/HydroShot). Required attribution remains in [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md). No upstream Git history is included.
+This standalone project derives from MIT-licensed [HydroShot](https://github.com/Real-Fruit-Snacks/HydroShot). Required attribution is preserved in [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).

@@ -1,11 +1,11 @@
 [package]
 name = "snipping-tool-ul"
-version = "0.3.8"
+version = "0.3.15"
 authors = ["Snipping Tool UL contributors"]
 description = "Snipping Tool UL: lightweight Windows screenshot capture, clipboard, annotation and image sharing"
 license = "MIT"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.89"
 
 [dependencies]
 winit = "0.30"
@@ -13,6 +13,8 @@ softbuffer = "0.4"
 tiny-skia = "0.11"
 tray-icon = "0.19"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+# Already used by image; exposes row decoding without a full PNG image buffer.
+png = "0.18"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 thiserror = "2"
@@ -43,7 +45,7 @@ resvg = "0.44"
 [build-dependencies]
 winres = "0.1"
 
-# Optimize dependencies even in dev builds — critical for GUI responsiveness.
+# Optimize dependencies even in dev builds for GUI responsiveness.
 # Without this, pixel operations (tiny-skia, fontdue, softbuffer) are 10-50x slower.
 [profile.dev.package."*"]
 opt-level = 2
@@ -59,6 +61,12 @@ strip = "debuginfo"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Globalization",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Win32_System_WinRT",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Direct2D",
@@ -73,6 +81,7 @@ windows = { version = "0.58", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_Console",
     "Win32_System_Threading",
+    "Win32_System_JobObjects",
     "Win32_System_StationsAndDesktops",
     "Win32_System_ProcessStatus",
     "Win32_System_LibraryLoader",

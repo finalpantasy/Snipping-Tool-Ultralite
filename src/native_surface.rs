@@ -45,9 +45,55 @@ impl Surface {
             match g.present(p) {
                 Ok(()) => return Ok(()),
                 Err(e) => {
-                    tracing::warn!("Glass presentation failed; using opaque fallback: {e}");
+                    tracing::warn!("Glass presentation failed: {e}");
                 }
             }
+            // A display change, RDP session switch or GPU reset returns
+            // D2DERR_RECREATE_TARGET; one rebuild keeps the glass look instead
+            // of downgrading this window to opaque for the rest of its life.
+            if let Ok(rebuilt) = Glass::new(&self.window) {
+                self.backend = Backend::Glass(rebuilt);
+                if let Backend::Glass(g) = &mut self.backend {
+                    if g.present(p).is_ok() {
+                        return Ok(());
+                    }
+                }
+            }
+            tracing::warn!("Glass presentation unavailable; using opaque fallback");
+            self.fall_back_to_soft()?;
+        }
+        self.present_soft(p.data(), p.width(), p.height())
+    }
+
+    /// Present a frame the caller fully redraws before the next present. The
+    /// pixel data is swizzled in place for the glass path, so no second
+    /// full-frame buffer is kept (5 MB at the default window, 33 MB at 4K).
+    pub fn present_consumed(&mut self, p: &mut tiny_skia::Pixmap) -> Result<(), String> {
+        #[cfg(target_os = "windows")]
+        if let Backend::Glass(g) = &mut self.backend {
+            match g.present_in_place(p) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    tracing::warn!("Glass presentation failed: {e}");
+                }
+            }
+            if let Ok(rebuilt) = Glass::new(&self.window) {
+                self.backend = Backend::Glass(rebuilt);
+                if let Backend::Glass(g) = &mut self.backend {
+                    if g.present_in_place(p).is_ok() {
+                        return Ok(());
+                    }
+                }
+            }
+            tracing::warn!("Glass presentation unavailable; using opaque fallback");
+            self.fall_back_to_soft()?;
+        }
+        self.present_soft(p.data(), p.width(), p.height())
+    }
+
+    #[cfg(target_os = "windows")]
+    fn fall_back_to_soft(&mut self) -> Result<(), String> {
+        {
             disable_glass(&self.window);
             let context =
                 softbuffer::Context::new(self.window.clone()).map_err(|e| e.to_string())?;
@@ -56,17 +102,21 @@ impl Surface {
                     .map_err(|e| e.to_string())?,
             );
         }
+        Ok(())
+    }
+
+    fn present_soft(&mut self, data: &[u8], width: u32, height: u32) -> Result<(), String> {
         let Backend::Soft(surface) = &mut self.backend else {
             return Err("Presenter unavailable".into());
         };
-        let (Some(w), Some(h)) = (NonZeroU32::new(p.width()), NonZeroU32::new(p.height())) else {
+        let (Some(w), Some(h)) = (NonZeroU32::new(width), NonZeroU32::new(height)) else {
             return Ok(());
         };
         surface.resize(w, h).map_err(|e| e.to_string())?;
         let mut buffer = surface.buffer_mut().map_err(|e| e.to_string())?;
         // No extra image allocation in the fallback path.
         let rgb = crate::ui::base();
-        for (dst, px) in buffer.iter_mut().zip(p.data().chunks_exact(4)) {
+        for (dst, px) in buffer.iter_mut().zip(data.chunks_exact(4)) {
             let inv = 255 - px[3] as u32;
             let c = |i: usize, b: u8| px[i] as u32 + (b as u32 * inv + 127) / 255;
             *dst = c(0, rgb.0) << 16 | c(1, rgb.1) << 8 | c(2, rgb.2);
@@ -199,16 +249,43 @@ impl Glass {
         }
     }
     fn present(&mut self, p: &tiny_skia::Pixmap) -> Result<(), String> {
+        let size = (p.width(), p.height());
+        if size != self.size && self.bgra.capacity() > p.data().len().saturating_mul(2) {
+            self.bgra = Vec::new();
+        }
+        self.bgra.resize(p.data().len(), 0);
+        for (dst, src) in self.bgra.chunks_exact_mut(4).zip(p.data().chunks_exact(4)) {
+            dst.copy_from_slice(&[src[2], src[1], src[0], src[3]]);
+        }
+        let bgra = std::mem::take(&mut self.bgra);
+        let result = unsafe { self.upload_and_draw(&bgra, size) };
+        self.bgra = bgra;
+        result
+    }
+
+    /// Swizzle the frame to BGRA in place and present it; the caller redraws
+    /// the whole pixmap before presenting again. Restores RGBA on failure so
+    /// the opaque fallback still receives correct data.
+    fn present_in_place(&mut self, p: &mut tiny_skia::Pixmap) -> Result<(), String> {
+        let size = (p.width(), p.height());
+        // Drop the retained buffer from any earlier `present` call.
+        self.bgra = Vec::new();
+        let swizzle = |data: &mut [u8]| {
+            for px in data.chunks_exact_mut(4) {
+                px.swap(0, 2);
+            }
+        };
+        swizzle(p.data_mut());
+        let result = unsafe { self.upload_and_draw(p.data(), size) };
+        if result.is_err() {
+            swizzle(p.data_mut());
+        }
+        result
+    }
+
+    unsafe fn upload_and_draw(&mut self, bgra: &[u8], size: (u32, u32)) -> Result<(), String> {
         unsafe {
             use windows::Win32::Graphics::{Direct2D::Common::*, Direct2D::*, Dxgi::Common::*};
-            let size = (p.width(), p.height());
-            if size != self.size && self.bgra.capacity() > p.data().len().saturating_mul(2) {
-                self.bgra = Vec::new();
-            }
-            self.bgra.resize(p.data().len(), 0);
-            for (dst, src) in self.bgra.chunks_exact_mut(4).zip(p.data().chunks_exact(4)) {
-                dst.copy_from_slice(&[src[2], src[1], src[0], src[3]]);
-            }
             if size != self.size {
                 self.target
                     .Resize(&D2D_SIZE_U {
@@ -223,7 +300,7 @@ impl Glass {
                                 width: size.0,
                                 height: size.1,
                             },
-                            Some(self.bgra.as_ptr() as _),
+                            Some(bgra.as_ptr() as _),
                             size.0 * 4,
                             &D2D1_BITMAP_PROPERTIES {
                                 pixelFormat: D2D1_PIXEL_FORMAT {
@@ -239,7 +316,7 @@ impl Glass {
                 self.size = size;
             } else if let Some(bitmap) = &self.bitmap {
                 bitmap
-                    .CopyFromMemory(None, self.bgra.as_ptr() as _, size.0 * 4)
+                    .CopyFromMemory(None, bgra.as_ptr() as _, size.0 * 4)
                     .map_err(|e| e.to_string())?;
             }
             self.target.BeginDraw();

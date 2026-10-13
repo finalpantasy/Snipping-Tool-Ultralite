@@ -6,6 +6,7 @@
 
 use std::num::NonZeroU32;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use notify_rust::Notification;
@@ -21,6 +22,20 @@ const PIN_BORDER: u32 = 3;
 /// Shadow offset for pinned windows
 const PIN_SHADOW: u32 = 2;
 
+static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
+
+/// Both the window and its encoder own this guard. The file is removed only
+/// after the window closes AND the encoder has released its file handle.
+struct TempImage {
+    path: PathBuf,
+}
+
+impl Drop for TempImage {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 pub struct PinnedWindow {
     window: Arc<Window>,
     surface: softbuffer::Surface<Arc<Window>, Arc<Window>>,
@@ -30,19 +45,26 @@ pub struct PinnedWindow {
     height: u32,
     dragging: bool,
     drag_start: Option<winit::dpi::PhysicalPosition<f64>>,
-    temp_path: Option<PathBuf>,
-}
-
-impl Drop for PinnedWindow {
-    fn drop(&mut self) {
-        // Clean the drag-and-drop temp file up on close AND on app exit.
-        if let Some(ref path) = self.temp_path {
-            let _ = std::fs::remove_file(path);
-        }
-    }
+    temp_path: Option<Arc<TempImage>>,
 }
 
 impl PinnedWindow {
+    /// The captured image inside the frame, as straight RGBA.
+    fn image_pixels(&self) -> (Vec<u8>, u32, u32) {
+        let border = PIN_BORDER;
+        let img_w = self.width.saturating_sub(border * 2 + PIN_SHADOW);
+        let img_h = self.height.saturating_sub(border * 2 + PIN_SHADOW);
+        let mut out = Vec::with_capacity((img_w * img_h * 4) as usize);
+        for y in 0..img_h {
+            let start = (((y + border) * self.width + border) * 4) as usize;
+            let end = start + (img_w * 4) as usize;
+            if let Some(row) = self.pixels.get(start..end) {
+                out.extend_from_slice(row);
+            }
+        }
+        (out, img_w, img_h)
+    }
+
     /// Create a pin for `pixels` (RGBA, `img_w` x `img_h`), positioned so the
     /// image content sits at screen position (`screen_x`, `screen_y`).
     pub fn create(
@@ -133,26 +155,49 @@ impl PinnedWindow {
             }
         };
 
-        // Save the pin image to a temp file for drag-and-drop / reveal support
+        // Save the capture (without the frame) to a temp file for reveal support.
         let temp_path = {
+            use image::ImageEncoder;
             let temp_dir = std::env::temp_dir();
             let ts = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis();
-            let path = temp_dir.join(format!("snipping_tool_ul_pin_{ts}.png"));
-            image::RgbaImage::from_raw(total_w, total_h, framed.clone()).and_then(|img| {
-                match img.save(&path) {
-                    Ok(()) => {
-                        tracing::info!("Pin temp file saved to {}", path.display());
-                        Some(path)
-                    }
+            let sequence = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
+            let path = temp_dir.join(format!(
+                "snipping_tool_ul_pin_{}_{ts}_{sequence}.png",
+                std::process::id()
+            ));
+            let owner = Arc::new(TempImage { path });
+            // Encode off the UI thread so the pin appears immediately; a reveal
+            // before the file lands simply opens the folder.
+            let file_owner = owner.clone();
+            let file_pixels = pixels.to_vec();
+            crate::background::spawn(move || {
+                let file_path = &file_owner.path;
+                let encoded = std::fs::File::create(file_path)
+                    .map_err(|e| e.to_string())
+                    .and_then(|file| {
+                        let mut out = std::io::BufWriter::new(file);
+                        image::codecs::png::PngEncoder::new_with_quality(
+                            &mut out,
+                            image::codecs::png::CompressionType::Fast,
+                            image::codecs::png::FilterType::Adaptive,
+                        )
+                        .write_image(&file_pixels, img_w, img_h, image::ExtendedColorType::Rgba8)
+                        .map_err(|e| e.to_string())?;
+                        use std::io::Write;
+                        out.flush().map_err(|e| e.to_string())
+                    });
+                match encoded {
+                    Ok(()) => tracing::info!("Pin temp file saved to {}", file_path.display()),
                     Err(e) => {
                         tracing::warn!("Failed to save pin temp file: {e}");
-                        None
+                        let _ = std::fs::remove_file(file_path);
                     }
                 }
-            })
+            });
+            Some(owner)
         };
 
         let mut pin = Self {
@@ -165,7 +210,10 @@ impl PinnedWindow {
             drag_start: None,
             temp_path,
         };
-        pin.render();
+        if let Err(error) = pin.render() {
+            tracing::error!("Failed to present pin: {error}");
+            return None;
+        }
         pin.window.set_cursor(CursorIcon::Grab);
         tracing::info!("Pinned {}x{} capture to screen", total_w, total_h);
         Some(pin)
@@ -175,21 +223,18 @@ impl PinnedWindow {
         self.window.id()
     }
 
-    pub fn render(&mut self) {
+    pub fn render(&mut self) -> Result<(), String> {
         let (w, h) = (self.width, self.height);
-        if let (Some(nz_w), Some(nz_h)) = (NonZeroU32::new(w), NonZeroU32::new(h)) {
-            if self.surface.resize(nz_w, nz_h).is_err() {
-                return;
-            }
-            if let Ok(mut buffer) = self.surface.buffer_mut() {
-                let pixel_count = (w * h) as usize;
-                for (i, chunk) in self.pixels.chunks_exact(4).take(pixel_count).enumerate() {
-                    buffer[i] =
-                        ((chunk[0] as u32) << 16) | ((chunk[1] as u32) << 8) | (chunk[2] as u32);
-                }
-                let _ = buffer.present();
-            }
+        let (nw, nh) = (
+            NonZeroU32::new(w).ok_or("Empty pin width")?,
+            NonZeroU32::new(h).ok_or("Empty pin height")?,
+        );
+        self.surface.resize(nw, nh).map_err(|e| e.to_string())?;
+        let mut buffer = self.surface.buffer_mut().map_err(|e| e.to_string())?;
+        for (pixel, rgba) in buffer.iter_mut().zip(self.pixels.chunks_exact(4)) {
+            *pixel = ((rgba[0] as u32) << 16) | ((rgba[1] as u32) << 8) | rgba[2] as u32;
         }
+        buffer.present().map_err(|e| e.to_string())
     }
 
     /// Handle an event for this pin's window. Returns true when the pin
@@ -198,7 +243,11 @@ impl PinnedWindow {
         match event {
             WindowEvent::CloseRequested => return true,
 
-            WindowEvent::RedrawRequested => self.render(),
+            WindowEvent::RedrawRequested => {
+                if let Err(error) = self.render() {
+                    tracing::warn!("Pin redraw failed: {error}");
+                }
+            }
 
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 if let Key::Named(NamedKey::Escape) = &event.logical_key {
@@ -229,7 +278,7 @@ impl PinnedWindow {
                 ..
             } => {
                 if let Some(ref path) = self.temp_path {
-                    reveal_in_file_manager(path);
+                    reveal_in_file_manager(&path.path);
                 }
             }
 
@@ -238,18 +287,23 @@ impl PinnedWindow {
                 button: MouseButton::Middle,
                 ..
             } => {
-                let pixels = self.pixels.clone();
-                let (w, h) = (self.width, self.height);
-                std::thread::spawn(move || match export::copy_to_clipboard(&pixels, w, h) {
-                    Ok(()) => {
-                        let _ = Notification::new()
-                            .summary("Snipping Tool UL")
-                            .body("Pin image copied to clipboard")
-                            .timeout(2000)
-                            .show();
-                    }
-                    Err(e) => {
-                        tracing::error!("Pin clipboard copy failed: {e}");
+                // Copy the capture itself, not the framed buffer: the frame
+                // carries the accent border and transparent shadow corners.
+                let (pixels, w, h) = self.image_pixels();
+                let ticket = crate::clipboard_queue::reserve();
+                crate::background::spawn(move || {
+                    match export::copy_with_ticket(ticket, &pixels, w, h) {
+                        Ok(true) => {
+                            let _ = Notification::new()
+                                .summary("Snipping Tool UL")
+                                .body("Pin image copied to clipboard")
+                                .timeout(2000)
+                                .show();
+                        }
+                        Ok(false) => {} // A newer request superseded this copy.
+                        Err(e) => {
+                            tracing::error!("Pin clipboard copy failed: {e}");
+                        }
                     }
                 });
             }
@@ -294,3 +348,61 @@ fn reveal_in_file_manager(path: &std::path::Path) {
 
 #[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn reveal_in_file_manager(_path: &std::path::Path) {}
+
+#[cfg(test)]
+mod temp_tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    fn owner() -> Arc<TempImage> {
+        let sequence = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
+        Arc::new(TempImage {
+            path: std::env::temp_dir().join(format!(
+                "ul-pin-lifetime-test-{}-{sequence}.png",
+                std::process::id()
+            )),
+        })
+    }
+
+    #[test]
+    fn closing_before_encoder_creates_file_still_cleans_it() {
+        let window = owner();
+        let path = window.path.clone();
+        let encoder = window.clone();
+        let (start, wait) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            wait.recv().unwrap();
+            std::fs::write(&encoder.path, b"synthetic image").unwrap();
+            assert!(encoder.path.exists());
+        });
+        drop(window);
+        start.send(()).unwrap();
+        worker.join().unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn closing_during_encoding_keeps_file_until_encoder_releases_it() {
+        let window = owner();
+        let path = window.path.clone();
+        let encoder = window.clone();
+        let (ready, opened) = mpsc::channel();
+        let (finish, wait) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            {
+                use std::io::Write;
+                let mut file = std::fs::File::create(&encoder.path).unwrap();
+                ready.send(()).unwrap();
+                wait.recv().unwrap();
+                file.write_all(b"synthetic image").unwrap();
+            }
+            drop(encoder);
+        });
+        opened.recv().unwrap();
+        drop(window);
+        assert!(path.exists());
+        finish.send(()).unwrap();
+        worker.join().unwrap();
+        assert!(!path.exists());
+    }
+}

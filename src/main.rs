@@ -35,9 +35,8 @@ use snipping_tool_ul::renderer::render_overlay;
 use snipping_tool_ul::settings_ui::SettingsWindow;
 use snipping_tool_ul::state::{AppState, OverlayState};
 use snipping_tool_ul::tools::{
-    annotation_bounding_box, apply_redo, apply_undo, hit_test_annotation, move_annotation,
-    recolor_annotation, record_undo, resize_annotation, Annotation, AnnotationTool, ResizeHandle,
-    ToolKind, UndoAction,
+    annotation_resize_bounds, hit_test_annotation, move_annotation, recolor_annotation,
+    record_undo, resize_annotation, Annotation, AnnotationTool, ResizeHandle, ToolKind, UndoAction,
 };
 use snipping_tool_ul::tray::{self, TrayState};
 use snipping_tool_ul::window_detect;
@@ -57,6 +56,20 @@ enum UserEvent {
         revision: u64,
         message: String,
         upload_done: bool,
+    },
+    ExportFinished {
+        copy_done: bool,
+        revision: u64,
+        message: String,
+        succeeded: bool,
+        close_on_success: Option<u64>,
+    },
+    OcrFinished {
+        operation: u64,
+        revision: u64,
+        message: String,
+        succeeded: bool,
+        close_on_success: Option<u64>,
     },
     SnipReady(Result<Option<SnipResult>, String>),
     SavePathReady {
@@ -87,9 +100,13 @@ struct App {
     editor_pointer_down: bool,
     editor_pointer: (f64, f64),
     image_revision: u64,
+    interaction_revision: u64,
+    copy_pending: bool,
     upload_pending: bool,
     upload_session: snipping_tool_ul::upload::UploadSession,
     save_dialog_pending: bool,
+    ocr_flight: OcrFlight,
+    ocr_worker: Option<std::thread::JoinHandle<()>>,
     integration_pending: bool,
     integration_status: String,
     proxy: EventLoopProxy<UserEvent>,
@@ -110,6 +127,7 @@ struct App {
     capture_at: Option<Instant>,
     _hotkey_manager: Option<global_hotkey::GlobalHotKeyManager>,
     hotkey_id: Option<u32>,
+    registered_hotkey: Option<String>,
     /// Set once the working set has been trimmed for the current tray-idle period.
     idle_trimmed: bool,
     pinned_windows: Vec<PinnedWindow>,
@@ -120,9 +138,33 @@ struct App {
     window_rects: Vec<window_detect::WinRect>,
     settings_window: Option<SettingsWindow>,
     history_window: Option<HistoryWindow>,
+    about_window: Option<snipping_tool_ul::about::AboutWindow>,
 }
 
 const FRAME_INTERVAL: Duration = Duration::from_millis(8); // event-driven, up to 125fps while editing
+
+#[derive(Default)]
+struct OcrFlight {
+    next: u64,
+    active: Option<u64>,
+}
+impl OcrFlight {
+    fn start(&mut self) -> Option<u64> {
+        if self.active.is_some() {
+            return None;
+        }
+        self.next = self.next.wrapping_add(1);
+        self.active = Some(self.next);
+        self.active
+    }
+    fn finish(&mut self, operation: u64) -> bool {
+        if self.active != Some(operation) {
+            return false;
+        }
+        self.active = None;
+        true
+    }
+}
 
 impl App {
     fn new(config: Config, proxy: EventLoopProxy<UserEvent>) -> Self {
@@ -144,9 +186,13 @@ impl App {
             editor_pointer_down: false,
             editor_pointer: (0., 0.),
             image_revision: 0,
+            interaction_revision: 0,
+            copy_pending: false,
             upload_pending: false,
             upload_session: Default::default(),
             save_dialog_pending: false,
+            ocr_flight: OcrFlight::default(),
+            ocr_worker: None,
             integration_pending: false,
             integration_status: String::new(),
             proxy,
@@ -165,6 +211,7 @@ impl App {
             capture_at: None,
             _hotkey_manager: None,
             hotkey_id: None,
+            registered_hotkey: None,
             idle_trimmed: false,
             pinned_windows: Vec::new(),
             immediate_capture: false,
@@ -174,6 +221,7 @@ impl App {
             window_rects: Vec::new(),
             settings_window: None,
             history_window: None,
+            about_window: None,
         }
     }
 
@@ -187,6 +235,7 @@ impl App {
                 self.config.hotkey.capture.clone(),
             );
             model.mode = self.capture_mode;
+            model.history_enabled = self.config.general.history_enabled;
             model.delay = self.delay_seconds;
             match LauncherWindow::create(event_loop, model) {
                 Ok(home) => self.launcher = Some(home),
@@ -201,9 +250,15 @@ impl App {
             home.model.connected = !self.config.general.imgur_client_id.is_empty()
                 || std::env::var("SNIPPING_TOOL_UL_IMGUR_CLIENT_ID").is_ok_and(|v| !v.is_empty());
             home.model.workflow = self.config.workflow.clone();
-            home.model.hotkey = self.config.hotkey.capture.clone();
+            home.model.history_enabled = self.config.general.history_enabled;
+            home.model.hotkey = self
+                .registered_hotkey
+                .clone()
+                .unwrap_or_else(|| "Unavailable".into());
             let _ = home.render();
             home.window.set_visible(true);
+            // focus_window() is ignored while minimized; restore first.
+            home.window.set_minimized(false);
             home.window.focus_window();
         }
     }
@@ -331,9 +386,9 @@ impl App {
             HomeAction::Undo | HomeAction::Redo => {
                 if let AppState::Capturing(ref mut o) = self.state {
                     if action == HomeAction::Undo {
-                        apply_undo(&mut o.annotations, &mut o.undo_stack, &mut o.redo_stack);
+                        o.undo_annotation();
                     } else {
-                        apply_redo(&mut o.annotations, &mut o.undo_stack, &mut o.redo_stack);
+                        o.redo_annotation();
                     }
                     o.selected_index = None;
                     o.sync_step_counter();
@@ -432,6 +487,7 @@ impl App {
         if let AppState::Capturing(ref mut o) = self.state {
             match action {
                 ButtonAction::Tool(kind) => {
+                    o.finish_annotation_drag();
                     o.active_tool = kind;
                     if kind != ToolKind::Select {
                         o.selected_index = None;
@@ -470,43 +526,79 @@ impl App {
 
     /// Register the global capture hotkey from config, falling back to the
     /// default binding when the configured one fails to parse or register.
-    fn register_hotkey_with_fallback(&mut self) {
-        // Drop any previous registration first.
-        self._hotkey_manager = None;
-        self.hotkey_id = None;
-
-        let binding = self.config.hotkey.capture.clone();
-        match snipping_tool_ul::hotkey::register_hotkey(&binding) {
-            Ok((manager, id)) => {
-                self._hotkey_manager = Some(manager);
-                self.hotkey_id = Some(id);
-                tracing::info!("Global hotkey registered: {}", binding);
-            }
-            Err(e) => {
-                tracing::warn!("Failed to register hotkey '{}': {}", binding, e);
-                const DEFAULT: &str = "Ctrl+Shift+S";
-                if binding != DEFAULT {
-                    match snipping_tool_ul::hotkey::register_hotkey(DEFAULT) {
-                        Ok((manager, id)) => {
-                            self._hotkey_manager = Some(manager);
-                            self.hotkey_id = Some(id);
-                            tracing::info!("Fell back to default hotkey {DEFAULT}");
-                            let _ = Notification::new()
-                                .summary("Snipping Tool UL")
-                                .body(&format!(
-                                    "Hotkey '{binding}' could not be registered — using {DEFAULT}"
-                                ))
-                                .timeout(4000)
-                                .show();
-                        }
-                        Err(e2) => tracing::warn!("Default hotkey also failed: {e2}"),
+    ///
+    /// `persist_fallback` rewrites config.toml with the binding that actually
+    /// registered. Settings passes true (the user just chose a binding that
+    /// failed, so the working one is kept). Startup passes false: another app
+    /// holding the key during login is transient, and overwriting the user's
+    /// chosen shortcut would lose it permanently.
+    fn register_hotkey_with_fallback(&mut self, persist_fallback: bool) {
+        let requested = self.config.hotkey.capture.clone();
+        if self.registered_hotkey.as_deref() == Some(requested.as_str()) {
+            return;
+        }
+        let mut failure = String::new();
+        for candidate in [requested.as_str(), "Ctrl+Shift+S"] {
+            match snipping_tool_ul::hotkey::register_hotkey(candidate) {
+                Ok((manager, id)) => {
+                    // Keep the old registration alive until the new one succeeds.
+                    self._hotkey_manager = Some(manager);
+                    self.hotkey_id = Some(id);
+                    self.registered_hotkey = Some(candidate.to_owned());
+                    break;
+                }
+                Err(e) => {
+                    failure = e;
+                    if self._hotkey_manager.is_some() {
+                        break;
                     }
                 }
             }
         }
+        if let Some(active) = &self.registered_hotkey {
+            if active != &requested {
+                let body = if persist_fallback {
+                    self.config.hotkey.capture = active.clone();
+                    match self.config.save() {
+                        Ok(()) => {
+                            format!("Could not use {requested}. Capture shortcut remains {active}.")
+                        }
+                        Err(e) => {
+                            tracing::error!("Could not persist retained hotkey: {e}");
+                            format!("Could not use {requested}. Using {active} for this session; saving the retained shortcut failed: {e}")
+                        }
+                    }
+                } else {
+                    format!(
+                        "{requested} is in use by another app. Using {active} for now; \
+                         {requested} will be tried again next start."
+                    )
+                };
+                let _ = Notification::new()
+                    .summary("Snipping Tool UL")
+                    .body(&body)
+                    .timeout(5000)
+                    .show();
+            }
+        } else {
+            tracing::error!("No capture hotkey available: {failure}");
+            let _ = Notification::new().summary("Snipping Tool UL")
+                .body("Capture hotkey is unavailable. Use New, or choose another shortcut in Settings.")
+                .timeout(5000).show();
+        }
+        // Show the binding that actually works, not the one that failed.
+        self.editor_ui.header.hotkey = self
+            .registered_hotkey
+            .clone()
+            .unwrap_or_else(|| self.config.hotkey.capture.clone());
     }
 
     fn trigger_capture(&mut self, _event_loop: &ActiveEventLoop) {
+        if self.picker_active {
+            return;
+        }
+        self.image_revision = self.image_revision.wrapping_add(1);
+        self.about_window = None;
         #[cfg(target_os = "windows")]
         {
             if self.picker_active {
@@ -518,31 +610,55 @@ impl App {
                 .launcher
                 .as_ref()
                 .is_some_and(|h| h.window.is_visible().unwrap_or(false));
-            self.launcher = None; // Release home render resources before the next capture.
+            // Hide first so nothing of ours can land in the screenshot, start
+            // the picker, then release previous render buffers while its worker
+            // captures the frozen desktop before showing selection windows.
+            if let Some(home) = &self.launcher {
+                home.window.set_visible(false);
+            }
+            if let Some(window) = &self.overlay_window {
+                window.set_visible(false);
+            }
             self.countdown = None;
             self.capture_at = None;
             let mode = self.capture_mode;
-            self.close_overlay();
-            self.image_revision = self.image_revision.wrapping_add(1);
-            let clipboard_ticket = snipping_tool_ul::clipboard_queue::reserve();
             self.picker_active = true;
             let proxy = self.proxy.clone();
-            std::thread::spawn(move || {
-                let selected = match mode {
-                    CaptureMode::Region => snipping_tool_ul::region_picker::select_region(),
-                    CaptureMode::Window => snipping_tool_ul::region_picker::select_window(),
-                    CaptureMode::FullScreen => {
-                        unsafe {
-                            let _ = windows::Win32::Graphics::Dwm::DwmFlush();
-                        }
-                        Ok(Some(capture::virtual_bounds()))
+            let picker = std::thread::spawn(move || {
+                // If anything below panics, the guard still reports back so
+                // `picker_active` cannot stay set and block every later capture.
+                let mut ready = ReadyGuard::new(
+                    proxy,
+                    UserEvent::SnipReady(Err("Capture stopped unexpectedly. Try again.".into())),
+                );
+                let result = (|| {
+                    // Present the removal of UL's windows before sampling. The
+                    // selection UI and final snip share exactly this snapshot.
+                    unsafe {
+                        let _ = windows::Win32::Graphics::Dwm::DwmFlush();
                     }
-                };
-                let result = selected.and_then(|rect| {
+                    let windows = if matches!(mode, CaptureMode::Window) {
+                        snipping_tool_ul::window_detect::enumerate_window_rects()
+                    } else {
+                        Vec::new()
+                    };
+                    let mut snapshot = capture::capture_region(capture::virtual_bounds())
+                        .map_err(|e| e.to_string())?;
+                    let rect = match mode {
+                        CaptureMode::Region => {
+                            snipping_tool_ul::region_picker::select_region(&mut snapshot)
+                        }
+                        CaptureMode::Window => {
+                            snipping_tool_ul::region_picker::select_window(&mut snapshot, &windows)
+                        }
+                        CaptureMode::FullScreen => Ok(Some(snapshot.bounds())),
+                    }?;
                     rect.map(|rect| {
-                        let screen = capture::capture_region(rect).map_err(|e| e.to_string())?;
+                        // Selection acceptance is the copy request boundary.
+                        let clipboard_ticket = snipping_tool_ul::clipboard_queue::reserve();
+                        let screen = snapshot.into_region(rect).map_err(|e| e.to_string())?;
                         // Populate the real Windows clipboard before displaying
-                        // the preview. No extra user click and no full desktop copy.
+                        // the preview. The temporary full desktop is now released.
                         let clipboard_error = match export::copy_with_ticket(
                             clipboard_ticket,
                             &screen.pixels,
@@ -562,9 +678,12 @@ impl App {
                         })
                     })
                     .transpose()
-                });
-                let _ = proxy.send_event(UserEvent::SnipReady(result));
+                })();
+                ready.send(UserEvent::SnipReady(result));
             });
+            drop(picker);
+            self.launcher = None; // Release home render resources before the next capture.
+            self.close_overlay();
             return;
         }
         #[cfg(not(target_os = "windows"))]
@@ -700,8 +819,8 @@ impl App {
                 if self.config.general.history_enabled {
                     let pixels = screenshot.pixels.clone();
                     let (w, h) = (screenshot.width, screenshot.height);
-                    std::thread::spawn(move || {
-                        let _ = snipping_tool_ul::history::save_to_history(&pixels, w, h);
+                    snipping_tool_ul::background::spawn(move || {
+                        let _ = snipping_tool_ul::history::save_to_history_if_new(&pixels, w, h);
                     });
                 }
                 let mut state = OverlayState::new(screenshot, &self.config);
@@ -741,8 +860,9 @@ impl App {
     }
 
     fn open_settings(&mut self, event_loop: &ActiveEventLoop) {
-        if self.settings_window.is_some() {
-            tracing::info!("Settings window already open");
+        if let Some(sw) = &self.settings_window {
+            sw.window.set_minimized(false);
+            sw.window.focus_window();
             return;
         }
 
@@ -795,7 +915,7 @@ impl App {
             self.editor_ui.sync_preferences(&self.config);
             snipping_tool_ul::theme::set_mode(self.config.theme_mode());
             if self.config.hotkey.capture != old_binding && !self.cli_only {
-                self.register_hotkey_with_fallback();
+                self.register_hotkey_with_fallback(true);
             }
         } else {
             // Discard any live theme preview from the Settings toggle.
@@ -807,9 +927,20 @@ impl App {
                 .set_checked(snipping_tool_ul::autostart::is_enabled());
         }
         self.settings_window = None;
+        if let Some(about) = &self.about_window {
+            about.window.request_redraw();
+        }
+        if let Some(history) = &self.history_window {
+            snipping_tool_ul::launcher::style_window(&history.window);
+            history.window.request_redraw();
+        }
         if let Some(home) = &mut self.launcher {
             home.model.workflow = self.config.workflow.clone();
-            home.model.hotkey = self.config.hotkey.capture.clone();
+            home.model.history_enabled = self.config.general.history_enabled;
+            home.model.hotkey = self
+                .registered_hotkey
+                .clone()
+                .unwrap_or_else(|| "Unavailable".into());
             snipping_tool_ul::launcher::style_window(&home.window);
             home.window.request_redraw();
         }
@@ -827,8 +958,10 @@ impl App {
     }
 
     fn open_history(&mut self, event_loop: &ActiveEventLoop) {
-        if self.history_window.is_some() {
-            tracing::info!("History window already open");
+        if let Some(history) = &mut self.history_window {
+            history.refresh();
+            history.window.set_minimized(false);
+            history.window.focus_window();
             return;
         }
 
@@ -873,7 +1006,7 @@ impl App {
 
         let mut hw = HistoryWindow::new(window, surface);
         snipping_tool_ul::launcher::style_window(&hw.window);
-        hw.render();
+        hw.render(self.config.general.history_enabled);
         tracing::info!("History window opened");
         self.history_window = Some(hw);
     }
@@ -886,8 +1019,10 @@ impl App {
     fn close_overlay(&mut self) {
         self.is_preview = false;
         self.native_surface = None;
+        self.editor_ui.release_frame_cache();
         self.editor_pointer_down = false;
         self.editor_view.end_pan();
+        self.editor_ui.cancel_new_capture();
         self.preview_frame = None;
         self.preview_renderer = Default::default();
         self.surface = None;
@@ -904,6 +1039,9 @@ impl App {
     }
 
     fn do_copy(&mut self) {
+        if self.copy_pending {
+            return;
+        }
         if let AppState::Capturing(ref mut o) = self.state {
             o.commit_text();
         }
@@ -917,24 +1055,37 @@ impl App {
             let revision = self.image_revision;
             let proxy = self.proxy.clone();
             let history = self.config.general.history_enabled;
-            if !self.is_preview {
-                self.close_overlay();
-            }
-            std::thread::spawn(move || {
-                let message = match export::copy_with_ticket(ticket, &pixels, w, h) {
+            let close_on_success = (!self.is_preview).then_some(self.interaction_revision);
+            self.copy_pending = true;
+            snipping_tool_ul::background::spawn(move || {
+                let mut ready = ReadyGuard::new(
+                    proxy,
+                    UserEvent::ExportFinished {
+                        copy_done: true,
+                        revision,
+                        succeeded: false,
+                        close_on_success,
+                        message: "Copy stopped unexpectedly. Image kept; retry Copy.".into(),
+                    },
+                );
+                let (succeeded, message) = match export::copy_with_ticket(ticket, &pixels, w, h) {
                     Ok(true) => {
                         if history {
-                            let _ = snipping_tool_ul::history::save_to_history(&pixels, w, h);
+                            // Repeated Copy clicks must not push older captures out.
+                            let _ =
+                                snipping_tool_ul::history::save_to_history_if_new(&pixels, w, h);
                         }
-                        "Copied to clipboard".into()
+                        (true, "Copied to clipboard".into())
                     }
-                    Ok(false) => return,
-                    Err(e) => format!("Copy failed: {e}. Click Copy to retry."),
+                    Ok(false) => (false, "A newer clipboard request was kept.".into()),
+                    Err(e) => (false, format!("Copy failed: {e}. Click Copy to retry.")),
                 };
-                let _ = proxy.send_event(UserEvent::Status {
+                ready.send(UserEvent::ExportFinished {
+                    copy_done: true,
                     revision,
                     message,
-                    upload_done: false,
+                    succeeded,
+                    close_on_success,
                 });
             });
         }
@@ -954,8 +1105,15 @@ impl App {
         let revision = self.image_revision;
         let proxy = self.proxy.clone();
         std::thread::spawn(move || {
+            let mut ready = ReadyGuard::new(
+                proxy,
+                UserEvent::SavePathReady {
+                    revision,
+                    path: None,
+                },
+            );
             let path = export::choose_save_path(dir.as_deref());
-            let _ = proxy.send_event(UserEvent::SavePathReady { revision, path });
+            ready.send(UserEvent::SavePathReady { revision, path });
         });
     }
 
@@ -978,41 +1136,57 @@ impl App {
                 })
             })
         } else {
+            // The chooser is not modal: the preview can be closed before a file
+            // is picked. Say so instead of silently dropping the choice.
+            let _ = Notification::new()
+                .summary("Snipping Tool UL")
+                .body("The capture was closed before a file was chosen. Nothing was saved.")
+                .timeout(4000)
+                .show();
             None
         };
         if let Some((pixels, w, h, annotations)) = save_data {
             let history_enabled = self.config.general.history_enabled;
-            if !self.is_preview {
-                self.close_overlay();
-            }
-            std::thread::spawn(move || {
+            let close_on_success = (!self.is_preview).then_some(self.interaction_revision);
+            let revision = self.image_revision;
+            let proxy = self.proxy.clone();
+            snipping_tool_ul::background::spawn(move || {
                 let pixels = if annotations.is_empty() {
                     pixels
                 } else {
                     export::flatten_annotations(&pixels, w, h, &annotations)
                 };
-                match export::save_image_to_path(pixels, w, h, &path) {
+                let (succeeded, message) = match export::save_image_to_path(pixels, w, h, &path) {
                     Ok(()) => {
                         // Copy saved file to history instead of re-encoding
                         if history_enabled {
                             let _ = snipping_tool_ul::history::save_to_history_from_file(&path);
                         }
                         tracing::info!("Saved to {}", path.display());
-                        let _ = Notification::new()
-                            .summary("Snipping Tool UL")
-                            .body(&format!("Saved to {}", path.display()))
-                            .timeout(2000)
-                            .show();
+                        (true, format!("Saved to {}", path.display()))
                     }
                     Err(e) => {
                         tracing::error!("Save failed: {e}");
+                        // A newer capture can supersede the editor status, but
+                        // it must not hide failure of a save already accepted.
                         let _ = Notification::new()
                             .summary("Snipping Tool UL")
-                            .body(&format!("Save failed: {e}"))
-                            .timeout(3000)
+                            .body(&format!("Could not save to {}: {e}", path.display()))
+                            .timeout(5000)
                             .show();
+                        (
+                            false,
+                            format!("Save failed: {e}. Image kept; click Save to retry."),
+                        )
                     }
-                }
+                };
+                let _ = proxy.send_event(UserEvent::ExportFinished {
+                    copy_done: false,
+                    revision,
+                    message,
+                    succeeded,
+                    close_on_success,
+                });
             });
         }
     }
@@ -1020,6 +1194,9 @@ impl App {
     fn do_upload(&mut self, event_loop: &ActiveEventLoop, explicit_accept: bool) {
         if self.upload_pending {
             return;
+        }
+        if let AppState::Capturing(ref mut o) = self.state {
+            o.commit_text();
         }
         let destination = self.config.workflow.upload_host;
         let host = destination.name();
@@ -1069,7 +1246,7 @@ impl App {
             if let Some(home) = &mut self.launcher {
                 home.model.menu = snipping_tool_ul::launcher::Menu::None;
             }
-            self.upload_pending = cached.is_none();
+            self.upload_pending = true;
             let ticket = snipping_tool_ul::clipboard_queue::reserve();
             let revision = self.image_revision;
             let proxy = self.proxy.clone();
@@ -1084,10 +1261,35 @@ impl App {
                 );
             }
             self.needs_redraw = true;
+            let reused = cached.is_some();
+            let pixels = if reused {
+                drop(pixels);
+                None
+            } else {
+                Some(pixels)
+            };
             std::thread::spawn(move || {
-                let reused = cached.is_some();
+                // A panic here would leave `upload_pending` set and the session
+                // busy until restart; the guard always reports completion.
+                let mut ready = ReadyGuard::new(
+                    proxy.clone(),
+                    if reused {
+                        UserEvent::Status {
+                            revision,
+                            message: "Link copy stopped unexpectedly. Retry Upload.".into(),
+                            upload_done: true,
+                        }
+                    } else {
+                        UserEvent::UploadFinished {
+                            revision,
+                            key,
+                            url: None,
+                            message: "Upload stopped unexpectedly. Click Upload to retry.".into(),
+                        }
+                    },
+                );
                 let result = cached.map(Ok).unwrap_or_else(|| {
-                    encode_png(pixels, w, h).and_then(|png| {
+                    encode_png(pixels.expect("new upload owns pixels"), w, h).and_then(|png| {
                         snipping_tool_ul::upload::upload_no_setup(&png, destination)
                     })
                 });
@@ -1113,13 +1315,13 @@ impl App {
                     Err(e) => format!("Upload failed: {e}. Image kept; click Upload to retry."),
                 };
                 if reused {
-                    let _ = proxy.send_event(UserEvent::Status {
+                    ready.send(UserEvent::Status {
                         revision,
                         message,
-                        upload_done: false,
+                        upload_done: true,
                     });
                 } else {
-                    let _ = proxy.send_event(UserEvent::UploadFinished {
+                    ready.send(UserEvent::UploadFinished {
                         revision,
                         key,
                         url,
@@ -1131,6 +1333,11 @@ impl App {
     }
 
     fn do_ocr(&mut self) {
+        // Reserve before copying pixels or taking a clipboard ticket. Repeated
+        // clicks must not allocate another image or invalidate this request.
+        let Some(operation) = self.ocr_flight.start() else {
+            return;
+        };
         // OCR reads the raw screenshot pixels (annotations would confuse it)
         let ocr_data = if let AppState::Capturing(ref overlay) = self.state {
             overlay.raw_selection()
@@ -1142,43 +1349,83 @@ impl App {
             let ticket = snipping_tool_ul::clipboard_queue::reserve();
             let revision = self.image_revision;
             let proxy = self.proxy.clone();
-            if !self.is_preview {
-                self.close_overlay();
+            let close_on_success = (!self.is_preview).then_some(self.interaction_revision);
+            if let Some(worker) = self.ocr_worker.take() {
+                let _ = worker.join();
             }
-            std::thread::spawn(move || {
-                let toast_msg = match snipping_tool_ul::ocr::extract_text(&cropped, w, h) {
+            self.ocr_worker = Some(std::thread::spawn(move || {
+                let mut ready = ReadyGuard::new(
+                    proxy,
+                    UserEvent::OcrFinished {
+                        operation,
+                        revision,
+                        message: "OCR stopped unexpectedly. Image kept; retry OCR.".into(),
+                        succeeded: false,
+                        close_on_success,
+                    },
+                );
+                let result = snipping_tool_ul::ocr::extract_text_owned(cropped, w, h);
+                let (succeeded, message) = match result {
                     Ok(text) => {
                         let char_count = text.chars().count();
-                        match snipping_tool_ul::clipboard_queue::run(ticket, || {
-                            arboard::Clipboard::new()
-                                .map_err(|e| e.to_string())?
-                                .set_text(&text)
-                                .map_err(|e| e.to_string())
-                        }) {
-                            Ok(true) => format!("OCR copied {char_count} characters"),
-                            Ok(false) => "OCR finished; newer clipboard content kept".into(),
-                            Err(e) => format!("OCR clipboard copy failed: {e}"),
+                        match snipping_tool_ul::clipboard_queue::run_cancellable(
+                            ticket,
+                            snipping_tool_ul::ocr::shutdown_requested,
+                            || {
+                                if snipping_tool_ul::ocr::shutdown_requested() {
+                                    return Err("OCR cancelled during shutdown".into());
+                                }
+                                arboard::Clipboard::new()
+                                    .map_err(|e| e.to_string())?
+                                    .set_text(&text)
+                                    .map_err(|e| e.to_string())
+                            },
+                        ) {
+                            Ok(true) => (true, format!("OCR copied {char_count} characters")),
+                            Ok(false) => {
+                                (false, "OCR finished; newer clipboard content kept".into())
+                            }
+                            Err(e) => (
+                                false,
+                                format!("OCR clipboard copy failed: {e}. Image kept; retry OCR."),
+                            ),
                         }
                     }
                     Err(e) => {
                         tracing::error!("OCR failed: {e}");
-                        format!("OCR failed: {e}")
+                        (false, format!("OCR failed: {e}. Image kept; retry OCR."))
                     }
                 };
-                let _ = proxy.send_event(UserEvent::Status {
+                ready.send(UserEvent::OcrFinished {
+                    operation,
                     revision,
-                    message: toast_msg,
-                    upload_done: false,
+                    message,
+                    succeeded,
+                    close_on_success,
                 });
-            });
+            }));
+        } else {
+            self.ocr_flight.finish(operation);
         }
     }
 
     fn do_pin(&mut self, event_loop: &ActiveEventLoop) {
+        let mut created = false;
+        if let AppState::Capturing(ref mut o) = self.state {
+            o.commit_text();
+        }
         if let AppState::Capturing(ref overlay) = self.state {
             if let Some((pixels, w, h)) = overlay.flattened_selection() {
                 if self.config.general.history_enabled {
-                    let _ = snipping_tool_ul::history::save_to_history(&pixels, w, h);
+                    // Encode off the UI thread; the pin should appear immediately.
+                    let history_pixels = pixels.clone();
+                    snipping_tool_ul::background::spawn(move || {
+                        let _ = snipping_tool_ul::history::save_to_history_if_new(
+                            &history_pixels,
+                            w,
+                            h,
+                        );
+                    });
                 }
 
                 // Position the pin where the selection is on screen, accounting
@@ -1192,11 +1439,27 @@ impl App {
                         PinnedWindow::create(event_loop, &pixels, w, h, screen_x, screen_y)
                     {
                         self.pinned_windows.push(pin);
+                        created = true;
                     }
                 }
             }
         }
+        if !created {
+            if let AppState::Capturing(ref mut o) = self.state {
+                o.show_toast(
+                    "Could not create the pin. Your image is still here; try again.".into(),
+                    8000,
+                );
+                self.needs_redraw = true;
+            }
+            return;
+        }
         self.close_overlay();
+        // `capture` from the command line has no tray: once the overlay is gone
+        // and no pin exists, nothing else can end the process.
+        if self.cli_only && self.pinned_windows.is_empty() {
+            event_loop.exit();
+        }
     }
 
     fn process_tray_events(&mut self, event_loop: &ActiveEventLoop) {
@@ -1226,21 +1489,35 @@ impl App {
                     self.trigger_capture(event_loop);
                 } else if event.id == tray.window_capture_id {
                     tracing::info!("Window capture menu item clicked");
+                    let previous_mode = self.capture_mode;
+                    let previous_window_mode = self.window_capture_mode;
                     self.capture_mode = CaptureMode::Window;
                     self.window_capture_mode = true;
                     self.window_rects = window_detect::enumerate_window_rects();
                     tracing::info!("Enumerated {} windows", self.window_rects.len());
                     self.trigger_capture(event_loop);
-                } else if event.id == tray.delay_3_id {
-                    tracing::info!("Capturing in 3 seconds...");
-                    // Don't set capture_at — countdown reaching 0 triggers the capture
-                    self.countdown = Countdown::start(event_loop, 3);
-                } else if event.id == tray.delay_5_id {
-                    tracing::info!("Capturing in 5 seconds...");
-                    self.countdown = Countdown::start(event_loop, 5);
-                } else if event.id == tray.delay_10_id {
-                    tracing::info!("Capturing in 10 seconds...");
-                    self.countdown = Countdown::start(event_loop, 10);
+                    self.capture_mode = previous_mode;
+                    self.window_capture_mode = previous_window_mode;
+                } else if event.id == tray.delay_3_id
+                    || event.id == tray.delay_5_id
+                    || event.id == tray.delay_10_id
+                {
+                    // A repeated timer request must not overlap the picker or
+                    // the grace period after the existing countdown disappears.
+                    if self.picker_active || self.countdown.is_some() || self.capture_at.is_some() {
+                        continue;
+                    }
+                    let seconds = if event.id == tray.delay_3_id {
+                        3
+                    } else if event.id == tray.delay_5_id {
+                        5
+                    } else {
+                        10
+                    };
+                    self.countdown = Countdown::start(event_loop, seconds);
+                    if self.countdown.is_none() {
+                        self.trigger_capture(event_loop);
+                    }
                 } else if event.id == tray.autostart_id {
                     let new_state = !snipping_tool_ul::autostart::is_enabled();
                     if let Err(e) = snipping_tool_ul::autostart::set_enabled(new_state) {
@@ -1262,9 +1539,18 @@ impl App {
                     tracing::info!("Settings menu item clicked");
                     self.open_settings(event_loop);
                 } else if event.id == tray.about_id {
-                    let _ = Notification::new().summary("Snipping Tool UL")
-                        .body(&format!("Version {}. Ultralight performance, full-featured snips. MIT; third-party notices included.",env!("CARGO_PKG_VERSION")))
-                        .timeout(5000).show();
+                    if let Some(about) = &self.about_window {
+                        about.window.set_minimized(false);
+                        about.show();
+                    } else {
+                        match snipping_tool_ul::about::AboutWindow::new(event_loop) {
+                            Ok(about) => {
+                                about.show();
+                                self.about_window = Some(about);
+                            }
+                            Err(e) => tracing::error!("Could not open About: {e}"),
+                        }
+                    }
                 }
             }
         }
@@ -1293,6 +1579,7 @@ impl App {
             &mut self.native_surface,
             &mut self.state,
         ) else {
+            self.needs_redraw = false;
             return;
         };
         self.editor_ui.draw_base(frame, dpi as f32);
@@ -1310,8 +1597,12 @@ impl App {
             .scale;
         self.editor_ui
             .draw_controls(frame, dpi as f32, overlay, zoom);
-        if let Err(e) = surface.present(frame) {
+        // draw_base repaints every pixel next frame, so the frame can be
+        // swizzled in place instead of copied into a second full-size buffer.
+        if let Err(e) = surface.present_consumed(frame) {
             tracing::error!("Editor present failed: {e}");
+            // Leaving the flag set would retry every 8 ms until the next input.
+            self.needs_redraw = false;
             return;
         }
         if !window.is_visible().unwrap_or(true) {
@@ -1448,7 +1739,7 @@ fn determine_cursor(
     if overlay.active_tool == ToolKind::Select {
         if let Some(idx) = overlay.selected_index {
             if let Some(ann) = overlay.annotations.get(idx) {
-                if let Some((bx, by, bw, bh)) = annotation_bounding_box(ann) {
+                if let Some((bx, by, bw, bh)) = annotation_resize_bounds(ann) {
                     let handles = [
                         (Point::new(bx, by), ResizeHandle::TopLeft),
                         (Point::new(bx + bw, by), ResizeHandle::TopRight),
@@ -1592,9 +1883,105 @@ fn hotkey_binding_from_key(mods: ModifiersState, key: &Key) -> Option<String> {
     Some(binding)
 }
 
+/// Sends a worker's result exactly once, or a failure if the worker unwinds
+/// before reporting. State flags such as `picker_active` and
+/// `save_dialog_pending` are only cleared by these events.
+struct ReadyGuard {
+    proxy: Option<winit::event_loop::EventLoopProxy<UserEvent>>,
+    fallback: Option<UserEvent>,
+}
+
+impl ReadyGuard {
+    fn new(proxy: winit::event_loop::EventLoopProxy<UserEvent>, fallback: UserEvent) -> Self {
+        Self {
+            proxy: Some(proxy),
+            fallback: Some(fallback),
+        }
+    }
+
+    fn send(&mut self, event: UserEvent) {
+        self.fallback = None;
+        if let Some(proxy) = self.proxy.take() {
+            let _ = proxy.send_event(event);
+        }
+    }
+}
+
+impl Drop for ReadyGuard {
+    fn drop(&mut self) {
+        if let (Some(proxy), Some(fallback)) = (self.proxy.take(), self.fallback.take()) {
+            let _ = proxy.send_event(fallback);
+        }
+    }
+}
+
 impl ApplicationHandler<UserEvent> for App {
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        snipping_tool_ul::ocr::cancel_pending();
+        if let Some(worker) = self.ocr_worker.take() {
+            if !snipping_tool_ul::background::join_worker_until(worker, deadline) {
+                tracing::warn!("Exiting with OCR clipboard work still finishing");
+            }
+        }
+        // Auto-save and history writers run detached; a `capture` CLI run or
+        // Quit right after Save must not kill them mid-file.
+        snipping_tool_ul::background::join_all_until(deadline);
+    }
+
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
+            UserEvent::OcrFinished {
+                operation,
+                revision,
+                message,
+                succeeded,
+                close_on_success,
+            } => {
+                // An old image's completion still releases its operation gate.
+                if self.ocr_flight.finish(operation) {
+                    self.user_event(
+                        event_loop,
+                        UserEvent::ExportFinished {
+                            copy_done: false,
+                            revision,
+                            message,
+                            succeeded,
+                            close_on_success,
+                        },
+                    );
+                }
+            }
+            UserEvent::ExportFinished {
+                copy_done,
+                revision,
+                message,
+                succeeded,
+                close_on_success,
+            } => {
+                if copy_done {
+                    self.copy_pending = false;
+                }
+                if revision == self.image_revision {
+                    self.user_event(
+                        event_loop,
+                        UserEvent::Status {
+                            revision,
+                            message,
+                            upload_done: false,
+                        },
+                    );
+                    if succeeded
+                        && close_on_success == Some(self.interaction_revision)
+                        && !self.is_preview
+                    {
+                        self.close_overlay();
+                        if self.cli_only {
+                            event_loop.exit();
+                        }
+                    }
+                }
+            }
             UserEvent::UploadFinished {
                 revision,
                 key,
@@ -1644,6 +2031,17 @@ impl ApplicationHandler<UserEvent> for App {
                 if event.state == global_hotkey::HotKeyState::Pressed
                     && Some(event.id) == self.hotkey_id
                 {
+                    // While Settings is recording a new shortcut, the registered
+                    // combo never reaches the window (RegisterHotKey swallows it).
+                    // Pressing it means "keep this one", not "start a capture".
+                    if let Some(sw) = &mut self.settings_window {
+                        if sw.editing_hotkey {
+                            sw.editing_hotkey = false;
+                            sw.needs_redraw = true;
+                            sw.window.request_redraw();
+                            return;
+                        }
+                    }
                     self.trigger_capture(event_loop);
                 }
             }
@@ -1689,7 +2087,7 @@ impl ApplicationHandler<UserEvent> for App {
                             let dir = self.config.auto_save_directory();
                             let proxy = self.proxy.clone();
                             let revision = self.image_revision;
-                            std::thread::spawn(move || {
+                            snipping_tool_ul::background::spawn(move || {
                                 let saved = dir
                                     .and_then(|dir| export::save_to_file(pixels, w, h, Some(&dir)));
                                 if let Err(e) = saved {
@@ -1705,8 +2103,8 @@ impl ApplicationHandler<UserEvent> for App {
                         if !self.config.workflow.open_preview && copied {
                             if self.config.general.history_enabled {
                                 let screen = snip.screen;
-                                std::thread::spawn(move || {
-                                    let _ = snipping_tool_ul::history::save_to_history(
+                                snipping_tool_ul::background::spawn(move || {
+                                    let _ = snipping_tool_ul::history::save_to_history_if_new(
                                         &screen.pixels,
                                         screen.width,
                                         screen.height,
@@ -1770,7 +2168,7 @@ impl ApplicationHandler<UserEvent> for App {
             }
 
             if self._hotkey_manager.is_none() {
-                self.register_hotkey_with_fallback();
+                self.register_hotkey_with_fallback(false);
             }
         }
 
@@ -1791,6 +2189,24 @@ impl ApplicationHandler<UserEvent> for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
+        // Do not close a legacy overlay after subsequent user interaction.
+        let interaction = match &event {
+            WindowEvent::MouseInput { state, .. } => *state == ElementState::Pressed,
+            WindowEvent::KeyboardInput { event, .. } => event.state == ElementState::Pressed,
+            WindowEvent::CursorMoved { .. } => true,
+            _ => false,
+        };
+        if interaction {
+            self.interaction_revision = self.interaction_revision.wrapping_add(1);
+        }
+        if let Some(about) = &mut self.about_window {
+            if about.window.id() == _window_id {
+                if about.event(&event) {
+                    self.about_window = None;
+                }
+                return;
+            }
+        }
         if self
             .launcher
             .as_ref()
@@ -1923,6 +2339,12 @@ impl ApplicationHandler<UserEvent> for App {
                 // PinnedWindow::drop removes the backing temp file.
                 self.pinned_windows.remove(pin_idx);
                 tracing::info!("Pinned window closed");
+                if self.cli_only
+                    && self.pinned_windows.is_empty()
+                    && matches!(self.state, AppState::Idle)
+                {
+                    _event_loop.exit();
+                }
             }
             return;
         }
@@ -1931,13 +2353,19 @@ impl ApplicationHandler<UserEvent> for App {
         if let Some(ref hw) = self.history_window {
             if hw.window.id() == _window_id {
                 match event {
+                    WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                        if let Some(hw) = &mut self.history_window {
+                            hw.window.request_redraw();
+                        }
+                        return;
+                    }
                     WindowEvent::CloseRequested => {
                         self.close_history();
                         return;
                     }
                     WindowEvent::RedrawRequested => {
                         if let Some(ref mut hw) = self.history_window {
-                            hw.render();
+                            hw.render(self.config.general.history_enabled);
                         }
                         return;
                     }
@@ -1957,7 +2385,7 @@ impl ApplicationHandler<UserEvent> for App {
                     } => {
                         if let Some(ref mut hw) = self.history_window {
                             if hw.on_click() {
-                                hw.render();
+                                hw.render(self.config.general.history_enabled);
                             }
                         }
                         return;
@@ -1993,7 +2421,11 @@ impl ApplicationHandler<UserEvent> for App {
             if sw.window.id() == _window_id {
                 match event {
                     WindowEvent::CloseRequested => {
-                        self.close_settings(false);
+                        // Config may already be on disk when only the startup
+                        // registration failed; discarding would leave the
+                        // running app on stale settings and re-save them later.
+                        let saved = sw.saved;
+                        self.close_settings(saved);
                         return;
                     }
                     WindowEvent::RedrawRequested
@@ -2147,7 +2579,8 @@ impl ApplicationHandler<UserEvent> for App {
                         }
 
                         if let Key::Named(NamedKey::Escape) = &event.logical_key {
-                            self.close_settings(false);
+                            let saved = self.settings_window.as_ref().is_some_and(|s| s.saved);
+                            self.close_settings(saved);
                             return;
                         }
                     }
@@ -2271,6 +2704,7 @@ impl ApplicationHandler<UserEvent> for App {
                         consumed = true;
                     }
                     WindowEvent::Focused(false) | WindowEvent::CursorLeft { .. } => {
+                        self.editor_ui.cancel_new_capture();
                         if self.editor_view.end_pan() {
                             window.set_cursor(CursorIcon::Default);
                         }
@@ -2414,6 +2848,18 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     }
                     WindowEvent::MouseInput {
+                        state: ElementState::Released,
+                        button: WinitMouseButton::Left,
+                        ..
+                    } if self.editor_ui.new_capture_armed() => {
+                        let p = Point::new(
+                            (self.editor_pointer.0 / dpi) as f32,
+                            (self.editor_pointer.1 / dpi) as f32,
+                        );
+                        requested = self.editor_ui.release_new_capture(p, w, h, o);
+                        consumed = true;
+                    }
+                    WindowEvent::MouseInput {
                         state: ElementState::Pressed,
                         button: WinitMouseButton::Left,
                         ..
@@ -2429,7 +2875,9 @@ impl ApplicationHandler<UserEvent> for App {
                             if a != HomeAction::EditSize {
                                 self.editor_ui.size_draft = None;
                             }
-                            if self.editor_ui.activate(a) {
+                            if a == HomeAction::New {
+                                self.editor_ui.arm_new_capture();
+                            } else if self.editor_ui.activate(a) {
                                 self.needs_redraw = true;
                             } else {
                                 requested = Some(a);
@@ -2640,6 +3088,20 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     return;
                 }
+                if self.is_preview
+                    && event.logical_key == Key::Named(NamedKey::Space)
+                    && self.modifiers.is_empty()
+                    && !self.editor_pointer_down
+                    && self.editor_ui.size_draft.is_none()
+                    && self.editor_ui.header.menu == snipping_tool_ul::launcher::Menu::None
+                    && self.editor_view.recenter_for_select(overlay)
+                {
+                    self.needs_redraw = true;
+                    if let Some(w) = &self.overlay_window {
+                        w.request_redraw();
+                    }
+                    return;
+                }
                 // --- Text input guard: MUST be first ---
                 if overlay.text_input_active {
                     let ctrl = self.modifiers.control_key();
@@ -2672,47 +3134,7 @@ impl ApplicationHandler<UserEvent> for App {
                             self.needs_redraw = true;
                         }
                         Key::Named(NamedKey::Enter) => {
-                            let buffer = overlay.text_input_buffer.clone();
-                            if let Some((idx, old_ann)) = overlay.text_edit_origin.take() {
-                                // Re-edit of an existing annotation: one Modify
-                                // step (or a Delete when the text was cleared).
-                                let idx = idx.min(overlay.annotations.len());
-                                if !buffer.is_empty() {
-                                    let ann = Annotation::Text {
-                                        position: overlay.text_input_position,
-                                        text: buffer,
-                                        color: overlay.current_color,
-                                        font_size: overlay.text_input_font_size,
-                                    };
-                                    overlay.annotations.insert(idx, ann);
-                                    record_undo(
-                                        &mut overlay.undo_stack,
-                                        &mut overlay.redo_stack,
-                                        UndoAction::Modify(idx, old_ann),
-                                    );
-                                } else {
-                                    record_undo(
-                                        &mut overlay.undo_stack,
-                                        &mut overlay.redo_stack,
-                                        UndoAction::Delete(idx, old_ann),
-                                    );
-                                }
-                            } else if !buffer.is_empty() {
-                                let ann = Annotation::Text {
-                                    position: overlay.text_input_position,
-                                    text: buffer,
-                                    color: overlay.current_color,
-                                    font_size: overlay.text_input_font_size,
-                                };
-                                overlay.annotations.push(ann);
-                                record_undo(
-                                    &mut overlay.undo_stack,
-                                    &mut overlay.redo_stack,
-                                    UndoAction::Add(overlay.annotations.len() - 1),
-                                );
-                            }
-                            overlay.text_input_buffer.clear();
-                            overlay.text_input_active = false;
+                            overlay.commit_text();
                             self.needs_redraw = true;
                         }
                         Key::Named(NamedKey::Escape) => {
@@ -2746,8 +3168,8 @@ impl ApplicationHandler<UserEvent> for App {
                             _ => return,
                         };
                         if overlay.selected_index.is_some() {
+                            overlay.cancel_annotation_drag();
                             overlay.selected_index = None;
-                            overlay.select_drag_start = None;
                             self.needs_redraw = true;
                         } else {
                             self.close_overlay();
@@ -2799,11 +3221,7 @@ impl ApplicationHandler<UserEvent> for App {
                                     AppState::Capturing(o) => o,
                                     _ => return,
                                 };
-                                if apply_redo(
-                                    &mut overlay.annotations,
-                                    &mut overlay.undo_stack,
-                                    &mut overlay.redo_stack,
-                                ) {
+                                if overlay.redo_annotation() {
                                     overlay.selected_index = None;
                                     overlay.sync_step_counter();
                                     self.needs_redraw = true;
@@ -2815,11 +3233,7 @@ impl ApplicationHandler<UserEvent> for App {
                                     AppState::Capturing(o) => o,
                                     _ => return,
                                 };
-                                if apply_undo(
-                                    &mut overlay.annotations,
-                                    &mut overlay.undo_stack,
-                                    &mut overlay.redo_stack,
-                                ) {
+                                if overlay.undo_annotation() {
                                     overlay.selected_index = None;
                                     overlay.sync_step_counter();
                                     self.needs_redraw = true;
@@ -2881,6 +3295,7 @@ impl ApplicationHandler<UserEvent> for App {
                                         AppState::Capturing(o) => o,
                                         _ => return,
                                     };
+                                    overlay.finish_annotation_drag();
                                     overlay.active_tool = tool;
                                     overlay.selected_index = None;
                                     self.needs_redraw = true;
@@ -2957,7 +3372,8 @@ impl ApplicationHandler<UserEvent> for App {
                         if zone == HitZone::Inside {
                             sel.move_by(dx, dy);
                         } else {
-                            sel.resize(zone, dx, dy);
+                            // The handle mirrors when dragged past the opposite edge.
+                            overlay.drag_zone = Some(sel.resize(zone, dx, dy));
                         }
                         self.needs_redraw = true;
                     }
@@ -3096,6 +3512,11 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
 
+                // Complete a text re-edit before hit-testing can remove another
+                // annotation or alter the indices referenced by undo history.
+                if overlay.active_tool == ToolKind::Select {
+                    overlay.commit_text();
+                }
                 let pos = overlay.last_mouse_pos;
 
                 // 1. Check toolbar hit first (only if selection exists)
@@ -3107,6 +3528,7 @@ impl ApplicationHandler<UserEvent> for App {
                         let action = BUTTONS.get(btn).map(|d| d.action);
                         match action {
                             Some(ButtonAction::Tool(kind)) => {
+                                overlay.finish_annotation_drag();
                                 overlay.active_tool = kind;
                                 if kind != ToolKind::Select {
                                     overlay.selected_index = None;
@@ -3186,7 +3608,7 @@ impl ApplicationHandler<UserEvent> for App {
                                     if let Some(idx) = overlay.selected_index {
                                         if let Some(ann) = overlay.annotations.get(idx) {
                                             if let Some((bx, by, bw, bh)) =
-                                                annotation_bounding_box(ann)
+                                                annotation_resize_bounds(ann)
                                             {
                                                 let handles = [
                                                     (Point::new(bx, by), ResizeHandle::TopLeft),
@@ -3275,6 +3697,9 @@ impl ApplicationHandler<UserEvent> for App {
                                 ToolKind::Pencil => overlay.pencil_tool.on_mouse_down(pos),
                                 ToolKind::Highlight => overlay.highlight_tool.on_mouse_down(pos),
                                 ToolKind::Text => {
+                                    // Clicking elsewhere while typing keeps the
+                                    // typed text instead of discarding it.
+                                    overlay.commit_text();
                                     overlay.text_tool.on_mouse_down(pos);
                                     if let Some(p) = overlay.text_tool.take_pending_position() {
                                         overlay.text_input_active = true;
@@ -3334,20 +3759,7 @@ impl ApplicationHandler<UserEvent> for App {
                     // Finalize annotation
                     let annotation = match overlay.active_tool {
                         ToolKind::Select => {
-                            // Record undo for move/resize if annotation changed
-                            if let Some((idx, old_ann)) = overlay.pre_drag_annotation.take() {
-                                if idx < overlay.annotations.len()
-                                    && overlay.annotations[idx] != old_ann
-                                {
-                                    record_undo(
-                                        &mut overlay.undo_stack,
-                                        &mut overlay.redo_stack,
-                                        UndoAction::Modify(idx, old_ann),
-                                    );
-                                }
-                            }
-                            overlay.select_drag_start = None;
-                            overlay.resize_handle = None;
+                            overlay.finish_annotation_drag();
                             None
                         }
                         ToolKind::Arrow => overlay.arrow_tool.on_mouse_up(pos),
@@ -3465,7 +3877,7 @@ impl ApplicationHandler<UserEvent> for App {
                 } else if overlay.text_input_active {
                     // Shift-wheel adjusts the annotation, ordinary wheel zooms.
                     overlay.text_input_font_size =
-                        (overlay.text_input_font_size + scroll).clamp(10.0, 72.0);
+                        (overlay.text_input_font_size + scroll).clamp(8.0, 128.0);
                 } else if overlay.active_tool == ToolKind::StepMarker {
                     let new_size = overlay.step_marker_tool.size() + scroll * 2.0;
                     overlay.step_marker_tool.set_size(new_size);
@@ -3562,18 +3974,25 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
 
-        // While a folder-picker dialog is open we must self-schedule wakeups —
-        // the dialog produces no winit events. This is set LAST so the idle
-        // ControlFlow::Wait above can't overwrite it (last write wins).
-        if self
-            .settings_window
-            .as_ref()
-            .is_some_and(|sw| sw.browse_pending())
-        {
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(100),
-            ));
-        }
+        // Pick the earliest deadline once. An idle branch must never erase a timer.
+        let now = Instant::now();
+        let toast = if let AppState::Capturing(ref o) = self.state {
+            o.toast_until.filter(|t| *t > now)
+        } else {
+            None
+        };
+        let deadline = snipping_tool_ul::scheduling::next_wake([
+            self.countdown.as_ref().map(|cd| cd.next_tick()),
+            self.capture_at,
+            toast,
+            self.needs_redraw
+                .then_some(self.last_render + FRAME_INTERVAL),
+            self.settings_window
+                .as_ref()
+                .is_some_and(|sw| sw.browse_pending())
+                .then_some(now + Duration::from_millis(100)),
+        ]);
+        event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
 
         self.trim_when_tray_idle();
     }
@@ -3588,6 +4007,7 @@ impl App {
             && self.launcher.is_none()
             && self.settings_window.is_none()
             && self.history_window.is_none()
+            && self.about_window.is_none()
             && self.countdown.is_none()
             && self.pinned_windows.is_empty()
             && self.overlay_window.is_none()
@@ -3846,5 +4266,23 @@ fn main() {
             eprintln!("Snipping Tool UL is portable. Install/uninstall commands are disabled to protect upstream installations.");
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod operation_tests {
+    use super::OcrFlight;
+    #[test]
+    fn ocr_rejects_duplicate_requests_and_ignores_stale_completions() {
+        let mut flight = OcrFlight::default();
+        let first = flight.start().unwrap();
+        assert!(flight.start().is_none());
+        assert!(flight.finish(first));
+        let second = flight.start().unwrap();
+        assert_ne!(first, second);
+        assert!(!flight.finish(first));
+        assert!(flight.start().is_none());
+        assert!(flight.finish(second));
+        assert!(flight.start().is_some());
     }
 }

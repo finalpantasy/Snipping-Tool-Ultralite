@@ -74,9 +74,30 @@ fn set_enabled_windows(enabled: bool, exe_path: Option<&std::path::Path>) -> Res
     unsafe {
         let mut key = HKEY::default();
         let path = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-        RegOpenKeyExW(HKEY_CURRENT_USER, path, 0, KEY_WRITE, &mut key)
-            .ok()
-            .map_err(|e| e.to_string())?;
+        // Create rather than open: a fresh profile may not have a Run key yet.
+        RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            path,
+            0,
+            None,
+            REG_OPTION_NON_VOLATILE,
+            KEY_WRITE,
+            None,
+            &mut key,
+            None,
+        )
+        .ok()
+        .map_err(|e| e.to_string())?;
+
+        struct CloseKey(HKEY);
+        impl Drop for CloseKey {
+            fn drop(&mut self) {
+                unsafe {
+                    let _ = RegCloseKey(self.0);
+                }
+            }
+        }
+        let _close = CloseKey(key);
 
         if enabled {
             let exe = exe_path.ok_or("exe_path required when enabling autostart")?;
@@ -90,10 +111,12 @@ fn set_enabled_windows(enabled: bool, exe_path: Option<&std::path::Path>) -> Res
                 .ok()
                 .map_err(|e| e.to_string())?;
         } else {
-            let _ = RegDeleteValueW(key, w!("Snipping Tool UL"));
+            let result = RegDeleteValueW(key, w!("Snipping Tool UL"));
+            if result != windows::Win32::Foundation::ERROR_FILE_NOT_FOUND {
+                result.ok().map_err(|e| e.to_string())?;
+            }
         }
 
-        let _ = RegCloseKey(key);
         Ok(())
     }
 }

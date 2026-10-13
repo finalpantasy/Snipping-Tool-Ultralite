@@ -352,11 +352,11 @@ fn recolor_all_colored_types() {
 fn bbox_arrow() {
     let ann = make_arrow();
     let (x, y, w, h) = annotation_bounding_box(&ann).unwrap();
-    // Arrow from (10,10) to (110,10), thickness 3 -> half = 1.5
-    assert!((x - 8.5).abs() < 0.01);
-    assert!((y - 8.5).abs() < 0.01);
-    assert!((w - 103.0).abs() < 0.01); // (110+1.5) - (10-1.5) = 103
-    assert!((h - 3.0).abs() < 0.01); // (10+1.5) - (10-1.5) = 3
+    // Bounds include the 18 px wide head and end exactly at its pointed tip.
+    assert!((x - 10.0).abs() < 0.01);
+    assert!((y - 1.0).abs() < 0.01);
+    assert!((w - 100.0).abs() < 0.01);
+    assert!((h - 18.0).abs() < 0.01);
 }
 
 #[test]

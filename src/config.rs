@@ -399,11 +399,14 @@ impl Config {
                     // Surface the error visibly; tracing output is invisible
                     // in a windows_subsystem = "windows" build.
                     tracing::warn!("Failed to parse config, using defaults: {e}");
-                    let _ = std::fs::copy(&path, path.with_extension("toml.bad"));
+                    let recovery = match std::fs::copy(&path, path.with_extension("toml.bad")) {
+                        Ok(_) => "A recovery copy was kept as config.toml.bad.".to_string(),
+                        Err(error) => format!("A recovery copy could not be saved: {error}. Copy the original config.toml before saving settings."),
+                    };
                     let _ = notify_rust::Notification::new()
                         .summary("Snipping Tool UL")
                         .body(&format!(
-                            "config.toml has an error and was ignored (copy kept as config.toml.bad):\n{e}"
+                            "config.toml has an error and was ignored: {e}\n{recovery}"
                         ))
                         .timeout(5000)
                         .show();
@@ -420,7 +423,10 @@ impl Config {
     /// Write current config to disk as TOML.
     pub fn save(&self) -> Result<(), String> {
         let path = Self::config_path().ok_or("Could not determine config directory")?;
+        self.save_to_path(&path)
+    }
 
+    fn save_to_path(&self, path: &std::path::Path) -> Result<(), String> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create config directory: {e}"))?;
@@ -429,11 +435,46 @@ impl Config {
         let contents =
             toml::to_string(self).map_err(|e| format!("Failed to serialize config: {e}"))?;
 
+        // Never replace an unparseable config unless its current bytes have
+        // first been copied somewhere the user can recover them from.
+        match std::fs::read_to_string(path) {
+            Ok(existing) if toml::from_str::<Config>(&existing).is_err() => {
+                let recovery_path = path.with_extension("toml.bad");
+                std::fs::copy(path, &recovery_path).map_err(|e| {
+                    format!(
+                        "Refusing to overwrite malformed config because its recovery copy could not be saved: {e}"
+                    )
+                })?;
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => {
+                // This can include non-UTF-8 or otherwise unreadable contents.
+                // Treat them as unparseable and require a successful copy too.
+                let recovery_path = path.with_extension("toml.bad");
+                std::fs::copy(path, &recovery_path).map_err(|copy_error| {
+                    format!(
+                        "Refusing to overwrite unreadable config because its recovery copy could not be saved: {copy_error}"
+                    )
+                })?;
+            }
+        }
+
         // Atomic write: write to a temp file then rename, so a crash mid-write
         // won't corrupt the config.
         let tmp_path = path.with_extension("toml.tmp");
-        std::fs::write(&tmp_path, &contents)
-            .map_err(|e| format!("Failed to write temp config file: {e}"))?;
+        let write = (|| {
+            use std::io::Write;
+            let mut file = std::fs::File::create(&tmp_path)?;
+            file.write_all(contents.as_bytes())?;
+            // Flush to disk before the rename so a power loss cannot leave an
+            // empty config.toml, which would silently parse as defaults.
+            file.sync_all()
+        })();
+        if let Err(e) = write {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(format!("Failed to write temp config file: {e}"));
+        }
         std::fs::rename(&tmp_path, &path)
             .map_err(|e| format!("Failed to rename config file: {e}"))?;
 
@@ -475,7 +516,13 @@ impl Config {
 
     /// Clamp thickness to the range 1.0..=20.0.
     pub fn clamped_thickness(&self) -> f32 {
-        self.general.default_thickness.clamp(1.0, 20.0)
+        let t = self.general.default_thickness;
+        // `nan` is valid TOML and clamp() passes it through unchanged.
+        if t.is_finite() {
+            t.clamp(1.0, 20.0)
+        } else {
+            3.0
+        }
     }
 
     /// Resolve auto-save's destination without silently substituting an unavailable path.
@@ -514,4 +561,51 @@ pub fn parse_hex_color(s: &str) -> Option<Color> {
         b as f32 / 255.0,
         1.0,
     ))
+}
+
+#[cfg(test)]
+mod config_save_recovery_tests {
+    use super::Config;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn failed_recovery_copy_keeps_malformed_config_until_a_copy_succeeds() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "snipping-tool-ul-config-recovery-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("create isolated config directory");
+        let path = directory.join("config.toml");
+        let recovery_path = path.with_extension("toml.bad");
+        let original = b"[general\ndefault_color = \"unfinished\"\n";
+        std::fs::write(&path, original).expect("write malformed config");
+        std::fs::create_dir(&recovery_path).expect("block recovery destination");
+
+        let config = Config::default();
+        let error = config
+            .save_to_path(&path)
+            .expect_err("save must stop when recovery copy fails");
+        assert!(error.contains("recovery copy could not be saved"));
+        assert_eq!(
+            std::fs::read(&path).expect("read original config"),
+            original
+        );
+
+        std::fs::remove_dir(&recovery_path).expect("unblock recovery destination");
+        config
+            .save_to_path(&path)
+            .expect("save after recovery copy can be made");
+        assert_eq!(
+            std::fs::read(&recovery_path).expect("read recovery copy"),
+            original
+        );
+        let saved = std::fs::read_to_string(&path).expect("read replacement config");
+        toml::from_str::<Config>(&saved).expect("replacement config is valid TOML");
+
+        std::fs::remove_dir_all(directory).expect("remove isolated config directory");
+    }
 }

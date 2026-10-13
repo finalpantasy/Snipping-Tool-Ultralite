@@ -13,6 +13,34 @@ pub enum HitZone {
     Right,
 }
 
+impl HitZone {
+    /// The zone a handle becomes when the rectangle flips horizontally.
+    pub fn mirror_x(self) -> Self {
+        match self {
+            Self::TopLeft => Self::TopRight,
+            Self::TopRight => Self::TopLeft,
+            Self::BottomLeft => Self::BottomRight,
+            Self::BottomRight => Self::BottomLeft,
+            Self::Left => Self::Right,
+            Self::Right => Self::Left,
+            other => other,
+        }
+    }
+
+    /// The zone a handle becomes when the rectangle flips vertically.
+    pub fn mirror_y(self) -> Self {
+        match self {
+            Self::TopLeft => Self::BottomLeft,
+            Self::BottomLeft => Self::TopLeft,
+            Self::TopRight => Self::BottomRight,
+            Self::BottomRight => Self::TopRight,
+            Self::Top => Self::Bottom,
+            Self::Bottom => Self::Top,
+            other => other,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Selection {
     pub x: f32,
@@ -32,11 +60,19 @@ pub struct ClampedRect {
 impl Selection {
     /// Return selection coordinates clamped to `[0, max_w)` / `[0, max_h)` and cast to u32.
     pub fn clamped(&self, max_w: u32, max_h: u32) -> ClampedRect {
-        let x = self.x.max(0.0).min(max_w as f32) as u32;
-        let y = self.y.max(0.0).min(max_h as f32) as u32;
-        let w = self.width.max(0.0).min((max_w.saturating_sub(x)) as f32) as u32;
-        let h = self.height.max(0.0).min((max_h.saturating_sub(y)) as f32) as u32;
-        ClampedRect { x, y, w, h }
+        // Clamp both edges, then derive the size: clamping only the origin
+        // would keep the full width after a drag past the left or top edge and
+        // export pixels the user never selected.
+        let x0 = self.x.round().clamp(0.0, max_w as f32);
+        let y0 = self.y.round().clamp(0.0, max_h as f32);
+        let x1 = (self.x + self.width).round().clamp(x0, max_w as f32);
+        let y1 = (self.y + self.height).round().clamp(y0, max_h as f32);
+        ClampedRect {
+            x: x0 as u32,
+            y: y0 as u32,
+            w: (x1 - x0) as u32,
+            h: (y1 - y0) as u32,
+        }
     }
 
     /// Create a selection from two points, normalizing so x/y is the minimum.
@@ -122,7 +158,11 @@ impl Selection {
     }
 
     /// Resize the selection by dragging a zone handle by (dx, dy).
-    pub fn resize(&mut self, zone: HitZone, dx: f32, dy: f32) {
+    ///
+    /// Returns the zone the pointer is now holding: when a handle is dragged
+    /// past the opposite edge the rectangle flips, and the caller must keep
+    /// applying deltas to the mirrored handle or the drag stops tracking.
+    pub fn resize(&mut self, zone: HitZone, dx: f32, dy: f32) -> HitZone {
         match zone {
             HitZone::TopLeft => {
                 self.x += dx;
@@ -163,13 +203,17 @@ impl Selection {
             }
         }
         // Normalize: if a handle was dragged past its opposite, flip so dimensions stay positive
+        let mut zone = zone;
         if self.width < 0.0 {
             self.x += self.width;
             self.width = -self.width;
+            zone = zone.mirror_x();
         }
         if self.height < 0.0 {
             self.y += self.height;
             self.height = -self.height;
+            zone = zone.mirror_y();
         }
+        zone
     }
 }

@@ -1,4 +1,4 @@
-use snipping_tool_ul::export::{crop_and_flatten, flatten_annotations};
+use snipping_tool_ul::export::{apply_spotlights, crop_and_flatten, flatten_annotations};
 use snipping_tool_ul::geometry::{Color, Point, Size};
 use snipping_tool_ul::tools::Annotation;
 
@@ -90,6 +90,35 @@ fn crop_and_flatten_crops_correctly() {
 }
 
 #[test]
+fn crop_rejects_row_geometry_that_overflows_u32_byte_offsets() {
+    let pixels = [1, 2, 3, 255];
+
+    // width * 4 wrapped to zero in u32 arithmetic, causing row 1 to alias
+    // byte 0 and return a pixel from an invalid, enormous image geometry.
+    let result = crop_and_flatten(&pixels, 1 << 30, 0, 1, 1, 1, &[]);
+
+    assert!(result.is_empty());
+}
+
+#[test]
+fn spotlight_with_infinite_height_clamps_its_row_range() {
+    let source = [
+        10, 20, 30, 255, 40, 50, 60, 255, 70, 80, 90, 255, 100, 110, 120, 255,
+    ];
+    let mut pixmap = tiny_skia::Pixmap::new(2, 2).unwrap();
+    pixmap.data_mut().copy_from_slice(&source);
+
+    apply_spotlights(
+        &mut pixmap,
+        &source,
+        2,
+        &[(Point::new(0.0, 1.0), Size::new(2.0, f32::INFINITY))],
+    );
+
+    assert_eq!(&pixmap.data()[8..16], &source[8..16]);
+}
+
+#[test]
 fn flatten_non_opaque_input_does_not_panic_and_premultiplies() {
     // Regression test: pixels with component > alpha used to hit
     // `PremultipliedColorU8::from_rgba(...).unwrap()` and panic. A capture
@@ -116,6 +145,41 @@ fn flatten_non_opaque_input_does_not_panic_and_premultiplies() {
     // Opaque pixels survive exactly
     assert_eq!(&result[8..12], &[255, 255, 255, 255]);
     assert_eq!(&result[12..16], &[0, 0, 0, 255]);
+}
+
+#[test]
+fn flatten_rejects_malformed_dimensions_before_pixmap_allocation() {
+    let annotation = Annotation::Rectangle {
+        top_left: Point::new(0.0, 0.0),
+        size: Size::new(1.0, 1.0),
+        color: Color::red(),
+        thickness: 1.0,
+    };
+    // The extra translucent pixel used to index beyond the one-pixel pixmap.
+    let oversized = [255, 255, 255, 255, 1, 2, 3, 64];
+    assert_eq!(
+        flatten_annotations(&oversized, 1, 1, &[annotation.clone()]),
+        oversized.to_vec()
+    );
+
+    let undersized = [255, 255, 255, 255];
+    assert_eq!(
+        flatten_annotations(&undersized, 2, 1, &[annotation.clone()]),
+        undersized.to_vec()
+    );
+
+    let zero_dimensions = [1, 2, 3, 4];
+    assert_eq!(
+        flatten_annotations(&zero_dimensions, 0, 1, &[annotation.clone()]),
+        zero_dimensions.to_vec()
+    );
+
+    // The checked RGBA length overflows usize for these dimensions.
+    let overflow_dimensions = [5, 6, 7, 8];
+    assert_eq!(
+        flatten_annotations(&overflow_dimensions, u32::MAX, u32::MAX, &[annotation]),
+        overflow_dimensions.to_vec()
+    );
 }
 
 #[test]

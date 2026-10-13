@@ -82,6 +82,57 @@ pub struct CapturedScreen {
     pub scale_factor: f64,
 }
 
+impl CapturedScreen {
+    pub fn bounds(&self) -> ScreenRect {
+        ScreenRect {
+            x: self.x_offset,
+            y: self.y_offset,
+            width: self.width,
+            height: self.height,
+        }
+    }
+
+    /// Consume a frozen desktop, retaining only the selected physical pixels.
+    /// No new desktop read occurs here. A full-screen selection reuses its buffer.
+    pub fn into_region(self, region: ScreenRect) -> Result<Self, CaptureError> {
+        let invalid = || CaptureError::PlatformError("Invalid snapshot pixels".into());
+        let stride = (self.width as usize).checked_mul(4).ok_or_else(invalid)?;
+        let expected = stride
+            .checked_mul(self.height as usize)
+            .ok_or_else(invalid)?;
+        if self.width == 0 || self.height == 0 || expected != self.pixels.len() {
+            return Err(invalid());
+        }
+        let bounds = self.bounds();
+        let region = region.intersect(bounds).ok_or(CaptureError::NoDisplay)?;
+        if region == bounds {
+            return Ok(self);
+        }
+        let row_bytes = (region.width as usize).checked_mul(4).ok_or_else(invalid)?;
+        let len = row_bytes
+            .checked_mul(region.height as usize)
+            .ok_or_else(invalid)?;
+        let x = (i64::from(region.x) - i64::from(bounds.x)) as usize;
+        let y = (i64::from(region.y) - i64::from(bounds.y)) as usize;
+        let mut pixels = Vec::new();
+        pixels.try_reserve_exact(len).map_err(|_| {
+            CaptureError::PlatformError("Not enough memory for selected image".into())
+        })?;
+        for row in y..y + region.height as usize {
+            let offset = row * stride + x * 4;
+            pixels.extend_from_slice(&self.pixels[offset..offset + row_bytes]);
+        }
+        Ok(Self {
+            pixels,
+            width: region.width,
+            height: region.height,
+            x_offset: region.x,
+            y_offset: region.y,
+            scale_factor: self.scale_factor,
+        })
+    }
+}
+
 /// Errors that can occur during screen capture.
 #[derive(Debug, thiserror::Error)]
 pub enum CaptureError {

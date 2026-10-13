@@ -199,7 +199,7 @@ fn toolbar_position_below_selection() {
         width: 400.0,
         height: 200.0,
     };
-    let toolbar = Toolbar::position_for(&sel, 1080.0);
+    let toolbar = Toolbar::position_for(&sel, 1920.0, 1080.0);
     // Should be centered below selection
     let expected_width = Toolbar::toolbar_width();
     let expected_x = (sel.x + (sel.width - expected_width) / 2.0).max(0.0);
@@ -215,7 +215,7 @@ fn toolbar_flips_above_when_near_bottom() {
         width: 400.0,
         height: 50.0,
     };
-    let toolbar = Toolbar::position_for(&sel, 1080.0);
+    let toolbar = Toolbar::position_for(&sel, 1920.0, 1080.0);
     // Should be above selection since bottom is near screen edge
     assert!(toolbar.y < sel.y);
 }
@@ -228,7 +228,7 @@ fn toolbar_hit_test_returns_button_index() {
         width: 400.0,
         height: 200.0,
     };
-    let toolbar = Toolbar::position_for(&sel, 1080.0);
+    let toolbar = Toolbar::position_for(&sel, 1920.0, 1080.0);
     let (bx, by, bw, bh) = toolbar.button_rect(0);
     // Click center of first button
     let result = toolbar.hit_test(Point::new(bx + bw / 2.0, by + bh / 2.0));
@@ -243,7 +243,7 @@ fn toolbar_hit_test_returns_none_outside() {
         width: 400.0,
         height: 200.0,
     };
-    let toolbar = Toolbar::position_for(&sel, 1080.0);
+    let toolbar = Toolbar::position_for(&sel, 1920.0, 1080.0);
     let result = toolbar.hit_test(Point::new(0.0, 0.0));
     assert_eq!(result, None);
 }

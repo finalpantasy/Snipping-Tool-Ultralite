@@ -57,7 +57,7 @@ fn main() {
                 cfg.workflow.clone(),
                 cfg.hotkey.capture.clone(),
             );
-            for cycle in 0..10 {
+            for cycle in 0..60 {
                 snipping_tool_ul::theme::set_mode(if cycle % 2 == 0 {
                     snipping_tool_ul::theme::ThemeMode::Dark
                 } else {
@@ -93,6 +93,14 @@ fn main() {
                 drop(surface);
                 drop(p);
                 drop(window);
+                let mut about = snipping_tool_ul::about::AboutWindow::new(event_loop)
+                    .expect("Private About window");
+                about.show();
+                about.render().expect("About presentation");
+                let closes = about.event(&winit::event::WindowEvent::CloseRequested);
+                assert!(closes, "About close must dismiss the dialog");
+                about.window.set_visible(false);
+                drop(about);
                 self.rows
                     .push(serde_json::json!({"after_close":cycle,"working_set_bytes":memory()}));
             }

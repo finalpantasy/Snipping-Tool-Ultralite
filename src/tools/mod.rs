@@ -223,37 +223,62 @@ pub enum ToolKind {
     Measurement,
 }
 
-/// Compute the three vertices of an arrowhead triangle.
-///
-/// The tip is at `end`. The two base vertices are placed at `4 * thickness`
-/// distance from the tip along the shaft, spread at +/- 30 degrees.
-pub fn arrowhead_points(start: Point, end: Point, thickness: f32) -> Vec<Point> {
+/// One closed silhouette, shared by rendering, selection and bounds.
+struct ArrowShape {
+    points: [Point; 7],
+    count: usize,
+}
+fn arrow_shape(start: Point, end: Point, thickness: f32) -> Option<ArrowShape> {
+    if ![start.x, start.y, end.x, end.y, thickness]
+        .iter()
+        .all(|v| v.is_finite())
+        || thickness <= 0.
+    {
+        return None;
+    }
     let dx = end.x - start.x;
     let dy = end.y - start.y;
-    let len = (dx * dx + dy * dy).sqrt();
-    if len < 1e-6 {
-        return vec![end, end, end];
+    let length = dx.hypot(dy);
+    if !length.is_finite() || length < 1e-6 {
+        return None;
     }
+    let ux = dx / length;
+    let uy = dy / length;
+    let head_length = (4. * thickness).min(length);
+    let head_half = head_length * 0.75;
+    let base = Point::new(end.x - ux * head_length, end.y - uy * head_length);
+    let offset = |p: Point, d: f32| Point::new(p.x - uy * d, p.y + ux * d);
+    let left = offset(base, head_half);
+    let right = offset(base, -head_half);
+    if head_length == length {
+        return Some(ArrowShape {
+            points: [end, left, right, right, right, right, right],
+            count: 3,
+        });
+    }
+    let half = thickness / 2.;
+    Some(ArrowShape {
+        points: [
+            end,
+            left,
+            offset(base, half),
+            offset(start, half),
+            offset(start, -half),
+            offset(base, -half),
+            right,
+        ],
+        count: 7,
+    })
+}
 
-    let ux = dx / len;
-    let uy = dy / len;
-
-    let side_length = 4.0 * thickness;
-    let half_angle: f32 = std::f32::consts::PI / 6.0; // 30 degrees
-    let back_dist = side_length * half_angle.cos();
-    let perp_offset = side_length * half_angle.sin();
-
-    // Perpendicular direction (rotate unit vector 90 degrees)
-    let px = -uy;
-    let py = ux;
-
-    let base_x = end.x - ux * back_dist;
-    let base_y = end.y - uy * back_dist;
-
-    let p1 = Point::new(base_x + px * perp_offset, base_y + py * perp_offset);
-    let p2 = Point::new(base_x - px * perp_offset, base_y - py * perp_offset);
-
-    vec![end, p1, p2]
+/// Tip plus two broad head corners. Head length scales with stroke width,
+/// capped to the arrow length; full head width is 1.5 times its length.
+pub fn arrowhead_points(start: Point, end: Point, thickness: f32) -> Vec<Point> {
+    match arrow_shape(start, end, thickness) {
+        Some(shape) if shape.count == 3 => shape.points[..3].to_vec(),
+        Some(shape) => vec![shape.points[0], shape.points[1], shape.points[6]],
+        None => vec![end, end, end],
+    }
 }
 
 /// Build a rounded rectangle path with the given corner radius.
@@ -315,25 +340,14 @@ pub fn render_annotation(
             paint.set_color(c);
             paint.anti_alias = true;
 
-            // Draw shaft
-            let mut pb = PathBuilder::new();
-            pb.move_to(start.x, start.y);
-            pb.line_to(end.x, end.y);
-            if let Some(path) = pb.finish() {
-                let stroke = Stroke {
-                    width: *thickness,
-                    ..Stroke::default()
-                };
-                pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
-            }
-
-            // Draw arrowhead (filled triangle)
-            let points = arrowhead_points(*start, *end, *thickness);
-            if points.len() == 3 {
+            // Fill once: the shaft joins the head at its base, never at its tip.
+            // A single fill also prevents dark seams on translucent arrows.
+            if let Some(shape) = arrow_shape(*start, *end, *thickness) {
                 let mut pb = PathBuilder::new();
-                pb.move_to(points[0].x, points[0].y);
-                pb.line_to(points[1].x, points[1].y);
-                pb.line_to(points[2].x, points[2].y);
+                pb.move_to(shape.points[0].x, shape.points[0].y);
+                for point in &shape.points[1..shape.count] {
+                    pb.line_to(point.x, point.y);
+                }
                 pb.close();
                 if let Some(path) = pb.finish() {
                     pixmap.fill_path(
@@ -557,15 +571,12 @@ pub fn render_annotation(
             let fs = size * 0.55;
 
             // Measure actual text dimensions using fontdue for precise centering
-            let font = &*crate::font::FONT;
+            let font = crate::font::FONT.for_text(&num_str);
 
             // Measure total advance width
             let total_width: f32 = num_str
                 .chars()
-                .map(|ch| {
-                    let (metrics, _) = font.rasterize(ch, fs);
-                    metrics.advance_width
-                })
+                .map(|ch| font.metrics(ch, fs).advance_width)
                 .sum();
 
             // Get line metrics for vertical centering
@@ -609,6 +620,13 @@ pub fn render_annotation(
             let ry = top_left.y.max(0.0) as usize;
             let pm_w = pixmap.width() as usize;
             let pm_h = pixmap.height() as usize;
+            if src_width == 0 || rx >= pm_w || ry >= pm_h {
+                return;
+            }
+            // Bound moved or unusually large annotations to real source pixels.
+            let src_height = src_pixels.len() / 4 / src_width;
+            let rw = rw.min(src_width.saturating_sub(rx));
+            let rh = rh.min(src_height.saturating_sub(ry));
 
             let mut by = 0;
             while by < rh {
@@ -619,10 +637,13 @@ pub fn render_annotation(
                     let px_x = rx + bx;
                     let px_y = ry + by;
 
-                    // Average source pixels in this block
+                    // Average source pixels in premultiplied RGBA. The source
+                    // buffer is straight RGBA, while tiny-skia pixmap data is
+                    // premultiplied. Transparent RGB must not tint the result.
                     let mut sum_r: u64 = 0;
                     let mut sum_g: u64 = 0;
                     let mut sum_b: u64 = 0;
+                    let mut sum_a: u64 = 0;
                     let mut count: u64 = 0;
 
                     for row in 0..bh {
@@ -632,47 +653,34 @@ pub fn render_annotation(
                             if sx < src_width {
                                 let si = (sy * src_width + sx) * 4;
                                 if si + 3 < src_pixels.len() {
-                                    sum_r += src_pixels[si] as u64;
-                                    sum_g += src_pixels[si + 1] as u64;
-                                    sum_b += src_pixels[si + 2] as u64;
+                                    let alpha = src_pixels[si + 3] as u64;
+                                    sum_r += src_pixels[si] as u64 * alpha;
+                                    sum_g += src_pixels[si + 1] as u64 * alpha;
+                                    sum_b += src_pixels[si + 2] as u64 * alpha;
+                                    sum_a += alpha;
                                     count += 1;
                                 }
                             }
                         }
                     }
 
-                    if let (Some(avg_r), Some(avg_g), Some(avg_b)) = (
-                        sum_r.checked_div(count),
-                        sum_g.checked_div(count),
-                        sum_b.checked_div(count),
-                    ) {
-                        let avg_r = avg_r as f32 / 255.0;
-                        let avg_g = avg_g as f32 / 255.0;
-                        let avg_b = avg_b as f32 / 255.0;
-
-                        // Clamp fill rect to pixmap bounds
+                    if count > 0 {
+                        let premul_divisor = count * 255;
+                        let color = [
+                            (sum_r / premul_divisor) as u8,
+                            (sum_g / premul_divisor) as u8,
+                            (sum_b / premul_divisor) as u8,
+                            (sum_a / count) as u8,
+                        ];
                         let fill_x = px_x.min(pm_w);
                         let fill_y = px_y.min(pm_h);
                         let fill_w = bw.min(pm_w.saturating_sub(fill_x));
                         let fill_h = bh.min(pm_h.saturating_sub(fill_y));
-
-                        if fill_w > 0 && fill_h > 0 {
-                            if let Some(rect) = tiny_skia::Rect::from_xywh(
-                                fill_x as f32,
-                                fill_y as f32,
-                                fill_w as f32,
-                                fill_h as f32,
-                            ) {
-                                let mut paint = Paint::default();
-                                if let Some(c) =
-                                    tiny_skia::Color::from_rgba(avg_r, avg_g, avg_b, 1.0)
-                                {
-                                    paint.set_color(c);
-                                } else {
-                                    paint.set_color(tiny_skia::Color::BLACK);
-                                }
-                                paint.anti_alias = false;
-                                pixmap.fill_rect(rect, &paint, Transform::identity(), None);
+                        let pixels = pixmap.data_mut();
+                        for y in fill_y..fill_y + fill_h {
+                            let start = (y * pm_w + fill_x) * 4;
+                            for pixel in pixels[start..start + fill_w * 4].chunks_exact_mut(4) {
+                                pixel.copy_from_slice(&color);
                             }
                         }
                     }
@@ -907,7 +915,7 @@ pub fn render_text_annotation(
     let pixels = pixmap.data_mut();
 
     for ch in text.chars() {
-        let (metrics, bitmap) = font.rasterize(ch, font_size);
+        let metrics = font.metrics(ch, font_size);
         if metrics.width == 0 || metrics.height == 0 {
             cursor_x += metrics.advance_width;
             continue;
@@ -919,14 +927,25 @@ pub fn render_text_annotation(
         let glyph_x = cursor_x.round() as i32 + metrics.xmin;
         let glyph_y = baseline_y.round() as i32 - metrics.height as i32 - metrics.ymin;
 
-        for row in 0..metrics.height {
-            for col in 0..metrics.width {
+        // Measure before rasterizing so clipped text does not allocate a glyph
+        // mask. Zoomed glyphs also blend only the part inside the viewport.
+        let col_start = (-i64::from(glyph_x)).max(0).min(metrics.width as i64) as usize;
+        let row_start = (-i64::from(glyph_y)).max(0).min(metrics.height as i64) as usize;
+        let col_end = (i64::from(pw) - i64::from(glyph_x))
+            .max(0)
+            .min(metrics.width as i64) as usize;
+        let row_end = (i64::from(ph) - i64::from(glyph_y))
+            .max(0)
+            .min(metrics.height as i64) as usize;
+        if col_start >= col_end || row_start >= row_end {
+            cursor_x += metrics.advance_width;
+            continue;
+        }
+        let (_, bitmap) = font.rasterize(ch, font_size);
+        for row in row_start..row_end {
+            for col in col_start..col_end {
                 let px_x = glyph_x + col as i32;
                 let px_y = glyph_y + row as i32;
-
-                if px_x < 0 || px_x >= pw || px_y < 0 || px_y >= ph {
-                    continue;
-                }
 
                 let coverage = bitmap[row * metrics.width + col] as f32 / 255.0;
                 let alpha = coverage * sa;
@@ -984,8 +1003,26 @@ pub fn hit_test_annotation(annotation: &Annotation, point: &Point, threshold: f3
             end,
             thickness,
             ..
+        } => {
+            let Some(shape) = arrow_shape(*start, *end, *thickness) else {
+                return false;
+            };
+            let mut inside = false;
+            for i in 0..shape.count {
+                let a = shape.points[i];
+                let b = shape.points[(i + 1) % shape.count];
+                if point_to_segment_distance(point, &a, &b) <= threshold.max(0.) {
+                    return true;
+                }
+                if (a.y > point.y) != (b.y > point.y)
+                    && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x
+                {
+                    inside = !inside;
+                }
+            }
+            inside
         }
-        | Annotation::Line {
+        Annotation::Line {
             start,
             end,
             thickness,
@@ -1028,8 +1065,16 @@ pub fn hit_test_annotation(annotation: &Annotation, point: &Point, threshold: f3
             let nx = (point.x - center.x) / radius_x;
             let ny = (point.y - center.y) / radius_y;
             let dist = (nx * nx + ny * ny).sqrt();
-            (dist - 1.0).abs()
-                < threshold / radius_x.min(*radius_y) + thickness / (2.0 * radius_x.min(*radius_y))
+            // Estimate the pixel distance to the outline from the implicit
+            // function's gradient. Comparing in normalized units let a wide,
+            // flat ellipse claim clicks across most of its interior.
+            let grad = ((nx / radius_x).powi(2) + (ny / radius_y).powi(2)).sqrt();
+            let pixel_dist = if grad > f32::EPSILON {
+                (dist - 1.0).abs() * dist / grad
+            } else {
+                radius_x.min(*radius_y)
+            };
+            pixel_dist < threshold + thickness / 2.0
         }
         Annotation::Highlight { top_left, size, .. }
         | Annotation::Pixelate { top_left, size, .. }
@@ -1041,9 +1086,16 @@ pub fn hit_test_annotation(annotation: &Annotation, point: &Point, threshold: f3
         }
         Annotation::Pencil {
             points, thickness, ..
-        } => points.windows(2).any(|seg| {
-            point_to_segment_distance(point, &seg[0], &seg[1]) < threshold + thickness / 2.0
-        }),
+        } => {
+            let tolerance = threshold + thickness / 2.0;
+            // A plain click leaves a single point, which `windows(2)` never visits.
+            if let [only] = points.as_slice() {
+                return (point.x - only.x).hypot(point.y - only.y) < tolerance;
+            }
+            points
+                .windows(2)
+                .any(|seg| point_to_segment_distance(point, &seg[0], &seg[1]) < tolerance)
+        }
         Annotation::Text {
             position,
             font_size,
@@ -1134,9 +1186,65 @@ pub enum ResizeHandle {
     BottomRight,
 }
 
+// Keep resize bounds aligned with the size controls in editing::SizeKind.
+const MIN_TEXT_FONT_SIZE: f32 = 8.0;
+const MAX_TEXT_FONT_SIZE: f32 = 128.0;
+const MIN_STEP_MARKER_SIZE: f32 = 16.0;
+const MAX_STEP_MARKER_SIZE: f32 = 60.0;
+
+fn opposite_resize_anchor(
+    handle: ResizeHandle,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+) -> (f32, f32) {
+    match handle {
+        ResizeHandle::TopLeft => (x + width, y + height),
+        ResizeHandle::TopRight => (x, y + height),
+        ResizeHandle::BottomLeft => (x + width, y),
+        ResizeHandle::BottomRight => (x, y),
+    }
+}
+
+fn top_left_from_opposite_anchor(
+    handle: ResizeHandle,
+    anchor_x: f32,
+    anchor_y: f32,
+    width: f32,
+    height: f32,
+) -> (f32, f32) {
+    let left = match handle {
+        ResizeHandle::TopLeft | ResizeHandle::BottomLeft => anchor_x - width,
+        ResizeHandle::TopRight | ResizeHandle::BottomRight => anchor_x,
+    };
+    let top = match handle {
+        ResizeHandle::TopLeft | ResizeHandle::TopRight => anchor_y - height,
+        ResizeHandle::BottomLeft | ResizeHandle::BottomRight => anchor_y,
+    };
+    (left, top)
+}
+
 /// Resize an annotation by dragging a corner handle to a new position.
+/// Bounds that resize handles map through. Stroke-padded boxes (arrow heads,
+/// line thickness, measurement end caps) must not be used here: scaling the
+/// padding along with the geometry makes the dragged handle lag the pointer.
+pub fn annotation_resize_bounds(annotation: &Annotation) -> Option<(f32, f32, f32, f32)> {
+    match annotation {
+        Annotation::Arrow { start, end, .. }
+        | Annotation::Line { start, end, .. }
+        | Annotation::Measurement { start, end, .. } => Some((
+            start.x.min(end.x),
+            start.y.min(end.y),
+            (start.x - end.x).abs(),
+            (start.y - end.y).abs(),
+        )),
+        other => annotation_bounding_box(other),
+    }
+}
+
 pub fn resize_annotation(annotation: &mut Annotation, handle: ResizeHandle, new_pos: Point) {
-    if let Some((bx, by, bw, bh)) = annotation_bounding_box(annotation) {
+    if let Some((bx, by, bw, bh)) = annotation_resize_bounds(annotation) {
         // Compute the new bounding box based on which corner was dragged
         let (new_x, new_y, new_w, new_h) = match handle {
             ResizeHandle::TopLeft => {
@@ -1161,19 +1269,26 @@ pub fn resize_annotation(annotation: &mut Annotation, handle: ResizeHandle, new_
             }
         };
 
+        // A perfectly horizontal or vertical line has no extent on one axis;
+        // that axis translates instead of scaling.
+        let flat_x = bw < 0.001;
+        let flat_y = bh < 0.001;
+
         // Don't allow negative/zero size
-        if new_w < 4.0 || new_h < 4.0 {
+        let has_type_specific_minimum = matches!(
+            annotation,
+            Annotation::Text { .. } | Annotation::StepMarker { .. }
+        );
+        if !has_type_specific_minimum && ((new_w < 4.0 && !flat_x) || (new_h < 4.0 && !flat_y)) {
             return;
         }
-
-        // Guard against degenerate bounding box (division by zero)
-        if bw < 0.001 || bh < 0.001 {
+        if flat_x && flat_y {
             return;
         }
 
         // Scale the annotation to fit the new bounding box
-        let sx = new_w / bw;
-        let sy = new_h / bh;
+        let sx = if flat_x { 1.0 } else { new_w / bw };
+        let sy = if flat_y { 1.0 } else { new_h / bh };
 
         // Apply transform based on annotation type
         match annotation {
@@ -1214,15 +1329,34 @@ pub fn resize_annotation(annotation: &mut Annotation, handle: ResizeHandle, new_
             Annotation::Text {
                 position,
                 font_size,
+                text,
                 ..
             } => {
-                position.x = new_x;
-                position.y = new_y;
-                *font_size *= sy; // scale font size vertically
+                // The ink box differs from the stored origin, and clamping the
+                // font size can make it differ from the requested resize box.
+                // Size from the requested height, then place the resulting ink
+                // bounds against the unchanged opposite handle.
+                let next_size = (*font_size * sy.max(f32::EPSILON))
+                    .clamp(MIN_TEXT_FONT_SIZE, MAX_TEXT_FONT_SIZE);
+                let (ink_x, ink_y, ink_w, ink_h) = text_ink_bounds(text, next_size);
+                let (anchor_x, anchor_y) = opposite_resize_anchor(handle, bx, by, bw, bh);
+                let (ink_left, ink_top) =
+                    top_left_from_opposite_anchor(handle, anchor_x, anchor_y, ink_w, ink_h);
+                position.x = ink_left - ink_x;
+                position.y = ink_top - ink_y;
+                *font_size = next_size;
             }
             Annotation::StepMarker { position, size, .. } => {
-                *position = Point::new(new_x + new_w / 2.0, new_y + new_h / 2.0);
-                *size = new_w.min(new_h);
+                // A marker is circular, so an aspect-changing drag cannot use
+                // the requested rectangle's center as its final center.
+                let diameter = new_w
+                    .min(new_h)
+                    .clamp(MIN_STEP_MARKER_SIZE, MAX_STEP_MARKER_SIZE);
+                let (anchor_x, anchor_y) = opposite_resize_anchor(handle, bx, by, bw, bh);
+                let (left, top) =
+                    top_left_from_opposite_anchor(handle, anchor_x, anchor_y, diameter, diameter);
+                *position = Point::new(left + diameter / 2.0, top + diameter / 2.0);
+                *size = diameter;
             }
         }
     }
@@ -1236,8 +1370,21 @@ pub fn annotation_bounding_box(annotation: &Annotation) -> Option<(f32, f32, f32
             end,
             thickness,
             ..
+        } => {
+            let shape = arrow_shape(*start, *end, *thickness)?;
+            let mut min_x = f32::INFINITY;
+            let mut min_y = f32::INFINITY;
+            let mut max_x = f32::NEG_INFINITY;
+            let mut max_y = f32::NEG_INFINITY;
+            for p in &shape.points[..shape.count] {
+                min_x = min_x.min(p.x);
+                min_y = min_y.min(p.y);
+                max_x = max_x.max(p.x);
+                max_y = max_y.max(p.y);
+            }
+            Some((min_x, min_y, max_x - min_x, max_y - min_y))
         }
-        | Annotation::Line {
+        Annotation::Line {
             start,
             end,
             thickness,

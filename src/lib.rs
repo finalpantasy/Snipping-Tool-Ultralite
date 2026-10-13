@@ -1,4 +1,6 @@
+pub mod about;
 pub mod autostart;
+pub mod background;
 pub mod capture;
 pub mod cli;
 pub mod clipboard_queue;
@@ -11,6 +13,8 @@ pub mod export;
 pub mod font;
 pub mod geometry;
 pub mod history;
+pub mod history_copy;
+pub mod history_thumbnails;
 pub mod history_ui;
 pub mod hotkey;
 pub mod icons;
@@ -26,6 +30,7 @@ pub mod preview_render;
 #[cfg(target_os = "windows")]
 pub mod region_picker;
 pub mod renderer;
+pub mod scheduling;
 pub mod settings_ui;
 pub mod state;
 pub mod theme;

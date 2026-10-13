@@ -1,0 +1,13 @@
+# 0.3.11 Capture History clarity and DPI correction
+
+Capture History is optional local storage for up to 20 images, allowing an older image to be copied again by clicking its thumbnail. It is off by default and separate from Auto-save. Enable it in Options > Settings > General > Keep capture history. Images are stored under `%LocalAppData%/snipping-tool-ul/history`.
+
+The former History renderer rasterized the complete window at 600 x 400 and enlarged that bitmap with nearest-neighbor sampling. At higher display scaling this enlarged low-resolution glyphs as well as thumbnails. The new renderer creates a pixmap at the actual physical client dimensions, rasterizes text at physical font sizes using the shared interface renderer, and presents those pixels directly. Thumbnails are prepared at the current display scale while their click bounds remain logical. Resize/display-scaling events request a redraw. The history renderer remains event driven, with no permanent repaint loop.
+
+The empty state now distinguishes "Capture history is off" from "No saved captures" and explains the recording setting and local retention. Saving Settings refreshes an open History window's theme and recording message. Existing saved images can still be viewed when recording is off; disabling recording does not delete them.
+
+217 locked all-target tests pass. New tests prove both header and empty-state labels contain native detail rather than enlarged pixels at 125%, 150% and 200% DPI. Further tests check enabled/disabled body rendering, physical thumbnails with consistent logical bounds and header clipping. Production empty-state renders were inspected in dark at 150% and light at 200%; all 16 theme/state/DPI fixtures use synthetic pixels and no disk images. These are headless rendering evidence, not native working-session screenshots.
+
+History storage/pruning tests now always use a unique temporary directory; the all-target suite also runs with an isolated config root. No user's stored capture contents are used as test fixtures. Formatting, Clippy without blocking errors (style warnings remain), whitespace and five mocked installer scenarios pass.
+
+The remapped 0.3.11 executable/package is checked for public identity, safe CLI behavior, icon resources, archive hashes and installed executable metadata/hash and shortcut/icon. Installation preserves running processes and does not launch the app. Testing creates no active-desktop windows, captures, clipboard writes or uploads. Native History appearance, moving between actual monitors, capture/paste and complete workflows remain isolated Windows acceptance gates. Prior gates from [0.3.10](VERIFICATION-0.3.10.md) remain; no commit, push or GitHub publication was performed.
