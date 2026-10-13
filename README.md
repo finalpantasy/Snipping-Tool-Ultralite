@@ -3,7 +3,7 @@
 <h1 align="center">Snipping Tool UL</h1>
 <p align="center"><strong>Ultralight in performance, not features.</strong><br>A lightweight native Rust snipping tool for Windows 11.</p>
 
-<p align="center"><a href="https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.19-preview/Snipping-Tool-UL-0.3.19-Windows-x64.zip"><strong>Download Windows preview</strong></a> · <a href="docs/USAGE.md">User guide</a> · <a href="LICENSE">MIT license</a></p>
+<p align="center"><a href="https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.21-preview/Snipping-Tool-UL-0.3.21-Windows-x64.zip"><strong>Download Windows preview</strong></a> · <a href="docs/USAGE.md">User guide</a> · <a href="LICENSE">MIT license</a></p>
 
 ![Light-mode editor rendered by the app code using a fictional sample](docs/media/editor-light.png)
 
@@ -34,9 +34,18 @@ Catbox, Freeimage.host and temporary Litterbox sharing need no account or person
 
 </details>
 
+<details>
+<summary>Upload shows progress and tells you when the link is ready</summary>
+
+![Light-mode upload feedback rendered by the app code using a sample URL](docs/media/upload-light.png)
+
+*App-code render with a sample URL; no image was uploaded for this picture. The button shows progress, then confirms **Link copied**. If copying fails, **Copy link** retries using the existing upload.*
+
+</details>
+
 ## Start using it
 
-1. [Download the Windows x64 ZIP](https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.19-preview/Snipping-Tool-UL-0.3.19-Windows-x64.zip) and extract it.
+1. [Download the Windows x64 ZIP](https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.21-preview/Snipping-Tool-UL-0.3.21-Windows-x64.zip) and extract it.
 2. Launch `snipping-tool-ul.exe`.
 3. Choose **New** or press **Ctrl+Shift+S**.
 
@@ -50,7 +59,7 @@ History image copying now keeps one active preparation and only the newest pendi
 
 Two 1,000-call native 4K OCR traces kept live Rust allocations and OS handles flat after warm-up. Windows cache memory still fluctuates. These are component measurements, not total app RAM or a speed comparison against Windows Snipping Tool. [Memory investigation](docs/LEAK-INVESTIGATION-2026-10-13.md)
 
-**0.3.19 is a preview.** The release passed 323 automated tests, plus native OCR lifecycle checks. Broader native workflows, mixed-monitor acceptance, live image-host uploads and a full interactive leak soak remain open. [Release verification](docs/VERIFICATION-0.3.19.md)
+**0.3.21 is a preview.** The release passed 328 automated tests, plus native OCR lifecycle checks. Broader native workflows, mixed-monitor acceptance, live image-host uploads and a full interactive leak soak remain open. [Release verification](docs/VERIFICATION-0.3.21.md)
 
 ## Build and contribute
 

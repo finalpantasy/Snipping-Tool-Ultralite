@@ -215,6 +215,69 @@ fn main() {
                 .save_png(out.join(format!("{name}-editor{suffix}.png")))
                 .unwrap();
         }
+        for (feedback, label) in [
+            (
+                snipping_tool_ul::upload_feedback::UploadFeedback::Preparing,
+                "preparing",
+            ),
+            (
+                snipping_tool_ul::upload_feedback::UploadFeedback::Uploading,
+                "sending",
+            ),
+            (
+                snipping_tool_ul::upload_feedback::UploadFeedback::completed(
+                    "https://files.catbox.moe/sample.png".into(),
+                    Ok(true),
+                    false,
+                ),
+                "copied",
+            ),
+            (
+                snipping_tool_ul::upload_feedback::UploadFeedback::completed(
+                    "https://files.catbox.moe/sample.png".into(),
+                    Err(()),
+                    false,
+                ),
+                "copy-failed",
+            ),
+            (
+                snipping_tool_ul::upload_feedback::UploadFeedback::Failed(
+                    "Connection unavailable".into(),
+                ),
+                "failed",
+            ),
+        ] {
+            home.menu = Menu::None;
+            home.has_image = true;
+            home.upload_feedback = feedback.clone();
+            let mut frame = Pixmap::new(WIDTH, home.height()).unwrap();
+            home.render(&mut frame);
+            composite(&frame)
+                .save_png(out.join(format!("{name}-upload-{label}-home.png")))
+                .unwrap();
+            ui.header.upload_feedback = feedback;
+            for (w, h, dpi, suffix) in [
+                (940, 612, 1., ""),
+                (660, 390, 1., "-minimum"),
+                (1410, 918, 1.5, "-dpi150"),
+            ] {
+                let mut frame = Pixmap::new(w, h).unwrap();
+                let view = EditorView::default();
+                ui.draw_base(&mut frame, dpi as f32);
+                PreviewRenderer::default().draw(&state, &mut frame, &view, dpi);
+                ui.draw_controls(
+                    &mut frame,
+                    dpi as f32,
+                    &mut state,
+                    view.framed_layout(500, 240, w, h, dpi).scale,
+                );
+                composite(&frame)
+                    .save_png(out.join(format!("{name}-upload-{label}{suffix}.png")))
+                    .unwrap();
+            }
+        }
+        home.upload_feedback = Default::default();
+        ui.header.upload_feedback = Default::default();
         for (action, label) in [
             (snipping_tool_ul::launcher::Action::New, "focus-new"),
             (snipping_tool_ul::launcher::Action::Button(7), "focus-tool"),

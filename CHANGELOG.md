@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.21
+
+- Route Escape to an open menu before dismissing upload feedback underneath it, in both home and editor.
+
+## 0.3.20
+
+- Acknowledge Upload before preparing the image, show progress in the button and place a larger result directly underneath it.
+- Distinguish link copied, upload succeeded but link copy failed, cached-link reuse and upload failure. Feedback never enters screenshot exports.
+
 ## 0.3.19
 
 - Use light mode for new or unspecified preferences while preserving saved dark-mode choices.

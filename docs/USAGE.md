@@ -65,3 +65,5 @@ This standalone repository derives from MIT-licensed [HydroShot](https://github.
 The empty launch window is a compact capture toolbar. Its registered screenshot shortcut stays visible underneath. Dropdowns temporarily expand the window and collapse when dismissed; a completed capture opens the full editor when preview is enabled.
 
 Light mode is the default for new or unspecified preferences. Choose dark mode in Settings if preferred; an existing saved dark choice is preserved.
+
+Upload shows progress in its button and a larger result directly beneath it. **Link copied** means the URL is ready to paste. **Copy link** means the upload succeeded but clipboard copying needs another attempt; clicking it reuses the existing link. **Retry** follows an upload failure. Close the feedback card or press Escape to dismiss it.

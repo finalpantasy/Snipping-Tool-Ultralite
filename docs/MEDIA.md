@@ -4,6 +4,7 @@ The current GitHub pictures are light-mode renders produced headlessly by the ac
 
 - `media/home-light.png`: the current compact launch toolbar and registered shortcut.
 - `media/editor-light.png`: the current editing interface with a fictional sample document.
+- `media/upload-light.png`: current upload-feedback controls with a sample URL. No HTTP upload or clipboard operation was performed for the render.
 
 No working desktop, account screen, notifications or private content was captured. These images are labelled app-code renders in the README. They do not establish native mixed-DPI, capture, clipboard, upload or focus acceptance.
 

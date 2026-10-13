@@ -39,6 +39,7 @@ use snipping_tool_ul::tools::{
     record_undo, resize_annotation, Annotation, AnnotationTool, ResizeHandle, ToolKind, UndoAction,
 };
 use snipping_tool_ul::tray::{self, TrayState};
+use snipping_tool_ul::upload_feedback::UploadFeedback;
 use snipping_tool_ul::window_detect;
 
 struct SnipResult {
@@ -81,6 +82,8 @@ enum UserEvent {
         key: [u8; 32],
         url: Option<String>,
         message: String,
+        feedback: UploadFeedback,
+        reused: bool,
     },
 }
 
@@ -250,6 +253,7 @@ impl App {
             home.model.connected = !self.config.general.imgur_client_id.is_empty()
                 || std::env::var("SNIPPING_TOOL_UL_IMGUR_CLIENT_ID").is_ok_and(|v| !v.is_empty());
             home.model.workflow = self.config.workflow.clone();
+            home.model.upload_feedback = self.editor_ui.header.upload_feedback.clone();
             home.model.history_enabled = self.config.general.history_enabled;
             home.model.hotkey = self
                 .registered_hotkey
@@ -356,6 +360,8 @@ impl App {
             HomeAction::Settings => self.open_settings(event_loop),
             HomeAction::History => self.open_history(event_loop),
             HomeAction::Upload => self.do_upload(event_loop, false),
+            HomeAction::DismissUploadFeedback => self.set_upload_feedback(UploadFeedback::None),
+            HomeAction::UploadFeedbackBody => {}
             HomeAction::ConfirmPublicUpload => self.do_upload(event_loop, true),
             HomeAction::CancelUpload => {
                 self.upload_session.cancel();
@@ -628,6 +634,7 @@ impl App {
             return;
         }
         self.image_revision = self.image_revision.wrapping_add(1);
+        self.set_upload_feedback(UploadFeedback::None);
         self.minimize_capture_windows();
         self.about_window = None;
         #[cfg(target_os = "windows")]
@@ -1214,10 +1221,28 @@ impl App {
         }
     }
 
+    fn set_upload_feedback(&mut self, feedback: UploadFeedback) {
+        self.editor_ui.header.upload_feedback = feedback.clone();
+        if let Some(home) = &mut self.launcher {
+            home.model.upload_feedback = feedback;
+            home.window.request_redraw();
+        }
+        self.needs_redraw = true;
+    }
+
     fn do_upload(&mut self, event_loop: &ActiveEventLoop, explicit_accept: bool) {
         if self.upload_pending {
+            if !self.editor_ui.header.upload_feedback.busy() {
+                self.set_upload_feedback(UploadFeedback::Busy);
+            }
             return;
         }
+        self.set_upload_feedback(UploadFeedback::Preparing);
+        // Present acknowledgement before synchronous flattening/PNG preparation.
+        if let Some(home) = &mut self.launcher {
+            let _ = home.render();
+        }
+        self.render();
         if let AppState::Capturing(ref mut o) = self.state {
             o.commit_text();
         }
@@ -1236,9 +1261,13 @@ impl App {
                 explicit_accept,
                 destination,
             ) {
-                snipping_tool_ul::upload::UploadDecision::Busy => return,
+                snipping_tool_ul::upload::UploadDecision::Busy => {
+                    self.set_upload_feedback(UploadFeedback::Busy);
+                    return;
+                }
                 snipping_tool_ul::upload::UploadDecision::Cooldown(remaining) => {
                     let seconds = remaining.as_secs_f64().ceil() as u64;
+                    self.set_upload_feedback(UploadFeedback::Cooldown(seconds));
                     let _ = self.proxy.send_event(UserEvent::Status {
                         revision: self.image_revision,
                         message: format!("Please wait {seconds}s before another upload."),
@@ -1247,6 +1276,7 @@ impl App {
                     return;
                 }
                 snipping_tool_ul::upload::UploadDecision::Confirm => {
+                    self.set_upload_feedback(UploadFeedback::None);
                     if !self.is_preview {
                         self.show_home(event_loop);
                     }
@@ -1270,6 +1300,11 @@ impl App {
                 home.model.menu = snipping_tool_ul::launcher::Menu::None;
             }
             self.upload_pending = true;
+            self.set_upload_feedback(if cached.is_some() {
+                UploadFeedback::Copying
+            } else {
+                UploadFeedback::Uploading
+            });
             let ticket = snipping_tool_ul::clipboard_queue::reserve();
             let revision = self.image_revision;
             let proxy = self.proxy.clone();
@@ -1296,19 +1331,15 @@ impl App {
                 // busy until restart; the guard always reports completion.
                 let mut ready = ReadyGuard::new(
                     proxy.clone(),
-                    if reused {
-                        UserEvent::Status {
-                            revision,
-                            message: "Link copy stopped unexpectedly. Retry Upload.".into(),
-                            upload_done: true,
-                        }
-                    } else {
-                        UserEvent::UploadFinished {
-                            revision,
-                            key,
-                            url: None,
-                            message: "Upload stopped unexpectedly. Click Upload to retry.".into(),
-                        }
+                    UserEvent::UploadFinished {
+                        revision,
+                        key,
+                        url: None,
+                        reused,
+                        feedback: UploadFeedback::Failed(
+                            "The request stopped unexpectedly.".into(),
+                        ),
+                        message: "Upload stopped unexpectedly. Image kept; click Retry.".into(),
                     },
                 );
                 let result = cached.map(Ok).unwrap_or_else(|| {
@@ -1317,41 +1348,31 @@ impl App {
                     })
                 });
                 let url = result.as_ref().ok().cloned();
-                let message = match result {
-                    Ok(url) => match snipping_tool_ul::clipboard_queue::run(ticket, || {
-                        arboard::Clipboard::new()
-                            .map_err(|e| e.to_string())?
-                            .set_text(&url)
-                            .map_err(|e| e.to_string())
-                    }) {
-                        Ok(true) => format!(
-                            "{}: {url}",
-                            if reused {
-                                "Existing link copied"
-                            } else {
-                                "Link copied"
-                            }
-                        ),
-                        Ok(false) => format!("Uploaded: {url} (newer clipboard content kept)"),
-                        Err(_) => format!("Uploaded: {url} (link copy failed)"),
-                    },
-                    Err(e) => format!("Upload failed: {e}. Image kept; click Upload to retry."),
+                let feedback = match result {
+                    Ok(url) => {
+                        let copied = snipping_tool_ul::clipboard_queue::run(ticket, || {
+                            arboard::Clipboard::new()
+                                .map_err(|e| e.to_string())?
+                                .set_text(&url)
+                                .map_err(|e| e.to_string())
+                        })
+                        .map_err(|_| ());
+                        UploadFeedback::completed(url, copied, reused)
+                    }
+                    Err(error) => UploadFeedback::Failed(error),
                 };
-                if reused {
-                    ready.send(UserEvent::Status {
-                        revision,
-                        message,
-                        upload_done: true,
-                    });
-                } else {
-                    ready.send(UserEvent::UploadFinished {
-                        revision,
-                        key,
-                        url,
-                        message,
-                    });
-                }
+                let message = feedback.message();
+                ready.send(UserEvent::UploadFinished {
+                    revision,
+                    key,
+                    url,
+                    message,
+                    feedback,
+                    reused,
+                });
             });
+        } else {
+            self.set_upload_feedback(UploadFeedback::None);
         }
     }
 
@@ -2015,8 +2036,17 @@ impl ApplicationHandler<UserEvent> for App {
                 key,
                 url,
                 message,
+                feedback,
+                reused,
             } => {
-                let upload_done = self.upload_session.finish(key, url);
+                let upload_done = reused || self.upload_session.finish(key, url);
+                if upload_done {
+                    if revision == self.image_revision {
+                        self.set_upload_feedback(feedback);
+                    } else if self.editor_ui.header.upload_feedback.busy() {
+                        self.set_upload_feedback(UploadFeedback::None);
+                    }
+                }
                 self.user_event(
                     event_loop,
                     UserEvent::Status {
@@ -2227,6 +2257,69 @@ impl ApplicationHandler<UserEvent> for App {
         };
         if interaction {
             self.interaction_revision = self.interaction_revision.wrapping_add(1);
+        }
+        let dismissible_feedback = if let Some(home) = self
+            .launcher
+            .as_ref()
+            .filter(|h| h.window.id() == _window_id)
+        {
+            home.model.escape_dismisses_feedback()
+        } else {
+            self.is_preview
+                && self
+                    .overlay_window
+                    .as_ref()
+                    .is_some_and(|w| w.id() == _window_id)
+                && self.editor_ui.header.escape_dismisses_feedback()
+        };
+        if dismissible_feedback
+            && matches!(&event, WindowEvent::KeyboardInput { event, .. }
+            if event.state == ElementState::Pressed && event.logical_key == Key::Named(NamedKey::Escape))
+        {
+            self.set_upload_feedback(UploadFeedback::None);
+            return;
+        }
+        let keyboard_or_wheel = matches!(&event,
+            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed)
+            || matches!(&event, WindowEvent::MouseWheel { .. });
+        let mouse_press = matches!(
+            &event,
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                ..
+            }
+        );
+        if keyboard_or_wheel || mouse_press {
+            let outside = if self.is_preview
+                && self
+                    .overlay_window
+                    .as_ref()
+                    .is_some_and(|w| w.id() == _window_id)
+            {
+                let w = self.overlay_window.as_ref().unwrap();
+                let logical_width = w.inner_size().width as f32 / w.scale_factor() as f32;
+                keyboard_or_wheel
+                    || !self
+                        .editor_ui
+                        .header
+                        .feedback_rect(logical_width, true)
+                        .contains(self.editor_ui.pointer)
+            } else if let Some(home) = &self.launcher {
+                home.window.id() == _window_id
+                    && (keyboard_or_wheel
+                        || !home
+                            .model
+                            .feedback_rect(snipping_tool_ul::launcher::WIDTH as f32, false)
+                            .contains(home.pointer))
+            } else {
+                false
+            };
+            if outside
+                && self.editor_ui.header.upload_feedback.visible()
+                && !self.editor_ui.header.upload_feedback.busy()
+            {
+                self.set_upload_feedback(UploadFeedback::None);
+            }
         }
         if let Some(about) = &mut self.about_window {
             if about.window.id() == _window_id {

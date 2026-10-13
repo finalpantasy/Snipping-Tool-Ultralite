@@ -254,7 +254,8 @@ impl EditorUi {
         if self.header.menu != Menu::None {
             return self.header.menu_targets(w);
         }
-        let mut t = self.header.bar_targets(w, true);
+        let mut t = self.header.feedback_targets(w, true);
+        t.extend(self.header.bar_targets(w, true));
         t.extend(self.context_targets(w, h, state));
         t.extend([
             Target::new(tx + 8., ty + 7., 34., 46., Action::Undo),
@@ -721,6 +722,7 @@ impl EditorUi {
                 }
             }
         }
+        self.header.render_upload_feedback(&mut c, w, true);
         self.header.render_focus(&mut c, &self.targets(w, h, state));
     }
 }

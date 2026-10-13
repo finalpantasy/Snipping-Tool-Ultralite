@@ -39,6 +39,8 @@ pub enum Action {
     Quit,
     History,
     Upload,
+    DismissUploadFeedback,
+    UploadFeedbackBody,
     ConfirmPublicUpload,
     CancelUpload,
     Connect,
@@ -93,6 +95,7 @@ pub struct Model {
     pub connecting: bool,
     pub draft: String,
     pub status: String,
+    pub upload_feedback: crate::upload_feedback::UploadFeedback,
     pub hotkey: String,
     pub menu: Menu,
     pub hovered: Option<Action>,
@@ -111,6 +114,7 @@ impl Model {
             connecting: false,
             draft: String::new(),
             status: String::new(),
+            upload_feedback: Default::default(),
             hotkey,
             menu: Menu::None,
             hovered: None,
@@ -123,9 +127,83 @@ impl Model {
     pub fn height(&self) -> u32 {
         if self.connecting || self.menu != Menu::None {
             HEIGHT
+        } else if self.upload_feedback.visible() {
+            190
         } else {
             COMPACT_HEIGHT
         }
+    }
+    pub fn feedback_visible(&self) -> bool {
+        self.upload_feedback.visible() && self.menu == Menu::None && !self.connecting
+    }
+    pub fn escape_dismisses_feedback(&self) -> bool {
+        self.feedback_visible() && !self.upload_feedback.busy()
+    }
+    pub fn feedback_rect(&self, w: f32, editor: bool) -> Rect {
+        Rect::new(w - if editor { 355. } else { 441. }, 68., 320., 110.)
+    }
+    pub fn feedback_targets(&self, w: f32, editor: bool) -> Vec<Target> {
+        if !self.feedback_visible() {
+            return Vec::new();
+        }
+        let r = self.feedback_rect(w, editor);
+        let mut targets = Vec::new();
+        if !self.upload_feedback.busy() {
+            targets.push(Target::new(
+                r.x + r.w - 28.,
+                r.y + 7.,
+                22.,
+                22.,
+                Action::DismissUploadFeedback,
+            ));
+        }
+        targets.push(Target::new(r.x, r.y, r.w, r.h, Action::UploadFeedbackBody));
+        targets
+    }
+    pub fn render_upload_feedback(&self, c: &mut Canvas, w: f32, editor: bool) {
+        if !self.feedback_visible() {
+            return;
+        }
+        let r = self.feedback_rect(w, editor);
+        c.round(r, 10., ui::panel(), 1.);
+        c.outline(r, 10., ui::focus_color(), 1.);
+        c.label(
+            r.x + 14.,
+            r.y + 13.,
+            self.upload_feedback.heading(),
+            14.,
+            ui::ink(),
+        );
+        if !self.upload_feedback.busy() {
+            c.centered(r.x + r.w - 17., r.y + 9., "×", 17., ui::muted());
+        }
+        let scale = c.scale;
+        let fit = |text: &str| {
+            let mut value: String = text.chars().take(160).collect();
+            let mut clipped = text.chars().count() > 160;
+            while ui::measure(&value, 12. * scale) / scale > r.w - 42. {
+                value.pop();
+                clipped = true;
+            }
+            if clipped {
+                value.push('…');
+            }
+            value
+        };
+        c.label(
+            r.x + 14.,
+            r.y + 43.,
+            &fit(self.upload_feedback.detail()),
+            12.,
+            ui::ink(),
+        );
+        c.label(
+            r.x + 14.,
+            r.y + 76.,
+            &fit(self.upload_feedback.hint()),
+            12.,
+            ui::muted(),
+        );
     }
     pub fn bar_targets(&self, w: f32, editor: bool) -> Vec<Target> {
         let mut t = vec![
@@ -217,7 +295,9 @@ impl Model {
         if self.menu != Menu::None {
             self.menu_targets(WIDTH as f32)
         } else {
-            self.bar_targets(WIDTH as f32, false)
+            let mut targets = self.feedback_targets(WIDTH as f32, false);
+            targets.extend(self.bar_targets(WIDTH as f32, false));
+            targets
         }
     }
     pub fn hit(&self, p: Point) -> Option<Action> {
@@ -353,9 +433,13 @@ impl Model {
             );
             c.button(
                 Rect::new(w - 131., 15., 96., 32.),
-                "Upload",
-                Some("upload"),
-                false,
+                self.upload_feedback.button_label(),
+                if self.upload_feedback.visible() {
+                    None
+                } else {
+                    Some("upload")
+                },
+                self.upload_feedback.visible(),
                 h(Action::Upload),
                 true,
             );
@@ -366,9 +450,13 @@ impl Model {
         } else {
             c.button(
                 Rect::new(w - 217., 15., 96., 32.),
-                "Upload",
-                Some("upload"),
-                false,
+                self.upload_feedback.button_label(),
+                if self.upload_feedback.visible() {
+                    None
+                } else {
+                    Some("upload")
+                },
+                self.upload_feedback.visible(),
                 h(Action::Upload),
                 self.has_image,
             );
@@ -630,7 +718,10 @@ impl Model {
         }
     }
     pub fn render_hint(&self, c: &mut Canvas, w: f32, editor: bool) {
-        if self.menu != Menu::None || self.connecting {
+        if self.menu != Menu::None
+            || self.connecting
+            || (self.hovered == Some(Action::Upload) && self.upload_feedback.visible())
+        {
             return;
         }
         if let Some(t) = self
@@ -714,11 +805,14 @@ impl Model {
                 label.pop();
             }
             let width = ui::measure(&label, 11. * scale) / scale;
-            c.label(638. - width, 78., &label, 11., ui::muted());
+            if !self.upload_feedback.visible() {
+                c.label(638. - width, 78., &label, 11., ui::muted());
+            }
         }
         if !self.connecting {
             self.render_menu(&mut c, WIDTH as f32);
             self.render_hint(&mut c, WIDTH as f32, false);
+            self.render_upload_feedback(&mut c, WIDTH as f32, false);
             if self.menu == Menu::None {
                 self.render_focus(&mut c, &self.bar_targets(WIDTH as f32, false));
             }
@@ -726,6 +820,11 @@ impl Model {
     }
 }
 pub fn step_focus(model: &mut Model, targets: &[Target], direction: i32) {
+    let targets: Vec<_> = targets
+        .iter()
+        .filter(|t| t.action != Action::UploadFeedbackBody)
+        .copied()
+        .collect();
     if targets.is_empty() {
         return;
     }

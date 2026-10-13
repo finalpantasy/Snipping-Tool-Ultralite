@@ -38,5 +38,6 @@ pub mod tools;
 pub mod tray;
 pub mod ui;
 pub mod upload;
+pub mod upload_feedback;
 pub mod window_detect;
 pub mod windows_integration;
