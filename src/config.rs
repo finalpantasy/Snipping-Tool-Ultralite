@@ -16,7 +16,7 @@ fn d_thickness() -> f32 {
     3.0
 }
 fn d_theme() -> String {
-    "dark".into()
+    "light".into()
 }
 fn d_capture() -> String {
     "Ctrl+Shift+S".into()
@@ -505,12 +505,12 @@ impl Config {
         }
     }
 
-    /// Resolve the configured theme into a `ThemeMode` (unknown → dark).
+    /// Resolve the configured theme into a `ThemeMode` (unknown → light).
     pub fn theme_mode(&self) -> crate::theme::ThemeMode {
-        if self.general.theme.eq_ignore_ascii_case("light") {
-            crate::theme::ThemeMode::Light
-        } else {
+        if self.general.theme.eq_ignore_ascii_case("dark") {
             crate::theme::ThemeMode::Dark
+        } else {
+            crate::theme::ThemeMode::Light
         }
     }
 

@@ -8,6 +8,115 @@ use tiny_skia::{Paint, PathBuilder, Pixmap, Transform};
 pub const INK: (u8, u8, u8) = (237, 234, 243);
 pub const MUTED: (u8, u8, u8) = (189, 183, 201);
 pub const BASE: (u8, u8, u8) = (36, 35, 41);
+
+/// Remove a visible UL window before capture, including minimize animations.
+/// Already hidden windows stay hidden; minimizing them could show them again.
+pub fn minimize_for_capture(window: &winit::window::Window) -> bool {
+    if !window.is_visible().unwrap_or(true) {
+        return false;
+    }
+    #[cfg(target_os = "windows")]
+    if let Err(error) = capture_cloak(window, true) {
+        tracing::warn!("Could not cloak capture controls: {error}");
+    }
+    window.set_minimized(true);
+    window.set_visible(false);
+    true
+}
+
+/// Restore only on an explicit reopen or cancelled capture, never on redraw.
+pub fn restore_after_capture(window: &winit::window::Window) {
+    window.set_visible(true);
+    window.set_minimized(false);
+    #[cfg(target_os = "windows")]
+    if let Err(error) = capture_cloak(window, false) {
+        tracing::warn!("Could not restore capture controls: {error}");
+    }
+}
+
+/// Activate a completed preview once, without sending synthetic input.
+pub fn activate_completed_preview(window: &winit::window::Window) {
+    if !window.is_visible().unwrap_or(false) || window.is_minimized() == Some(true) {
+        return;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::{
+            Foundation::HWND,
+            UI::WindowsAndMessaging::{
+                GetForegroundWindow, SetForegroundWindow, SetWindowPos, HWND_TOP, SWP_NOACTIVATE,
+                SWP_NOMOVE, SWP_NOSIZE,
+            },
+        };
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let Ok(handle) = window.window_handle() else {
+            return;
+        };
+        let RawWindowHandle::Win32(raw) = handle.as_raw() else {
+            return;
+        };
+        let hwnd = HWND(raw.hwnd.get() as _);
+        unsafe {
+            // Raise a normal window once; this does not make it always on top.
+            if let Err(error) = SetWindowPos(
+                hwnd,
+                HWND_TOP,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            ) {
+                tracing::warn!("Could not raise capture preview: {error}");
+            }
+            if GetForegroundWindow() != hwnd && !SetForegroundWindow(hwnd).as_bool() {
+                // Honor Windows focus restrictions without input injection,
+                // persistent topmost state, retries or changing OS settings.
+                window
+                    .request_user_attention(Some(winit::window::UserAttentionType::Informational));
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    window.focus_window();
+}
+
+#[cfg(target_os = "windows")]
+fn capture_cloak(window: &winit::window::Window, cloaked: bool) -> Result<(), String> {
+    use windows::Win32::{
+        Foundation::{BOOL, HWND},
+        Graphics::Dwm::*,
+    };
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let handle = window.window_handle().map_err(|e| e.to_string())?;
+    let RawWindowHandle::Win32(raw) = handle.as_raw() else {
+        return Err("Capture controls have no Win32 window handle".into());
+    };
+    let hwnd = HWND(raw.hwnd.get() as _);
+    unsafe {
+        let disabled = BOOL(1);
+        // DwmFlush waits for a frame, not the entire fade/minimize animation.
+        // Disable our transitions and cloak before changing native visibility.
+        if cloaked {
+            if let Err(error) = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_TRANSITIONS_FORCEDISABLED,
+                &disabled as *const _ as _,
+                std::mem::size_of::<BOOL>() as u32,
+            ) {
+                tracing::warn!("Could not disable capture-window transitions: {error}");
+            }
+        }
+        let cloak = BOOL(i32::from(cloaked));
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAK,
+            &cloak as *const _ as _,
+            std::mem::size_of::<BOOL>() as u32,
+        )
+        .map_err(|e| e.to_string())
+    }
+}
 pub(crate) fn font() -> &'static crate::font::LazyFont {
     &crate::font::FONT
 }

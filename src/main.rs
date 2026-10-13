@@ -226,7 +226,7 @@ impl App {
     }
 
     fn show_home(&mut self, event_loop: &ActiveEventLoop) {
-        if self.picker_active {
+        if self.picker_active || self.countdown.is_some() || self.capture_at.is_some() {
             return;
         }
         if self.launcher.is_none() {
@@ -256,9 +256,7 @@ impl App {
                 .clone()
                 .unwrap_or_else(|| "Unavailable".into());
             let _ = home.render();
-            home.window.set_visible(true);
-            // focus_window() is ignored while minimized; restore first.
-            home.window.set_minimized(false);
+            snipping_tool_ul::ui::restore_after_capture(&home.window);
             home.window.focus_window();
         }
     }
@@ -314,17 +312,14 @@ impl App {
                 }
             }
             HomeAction::New => {
-                self.restore_home_on_cancel = true;
                 if self.picker_active || self.countdown.is_some() || self.capture_at.is_some() {
                     return;
                 }
-                if let Some(home) = &self.launcher {
-                    home.window.set_visible(false);
-                }
+                self.restore_home_on_cancel = true;
+                self.minimize_capture_windows();
                 if self.delay_seconds == 0 {
                     self.trigger_capture(event_loop);
                 } else {
-                    self.close_overlay();
                     self.countdown = Countdown::start(event_loop, self.delay_seconds);
                     if self.countdown.is_none() {
                         self.trigger_capture(event_loop);
@@ -590,7 +585,42 @@ impl App {
         self.editor_ui.header.hotkey = self
             .registered_hotkey
             .clone()
-            .unwrap_or_else(|| self.config.hotkey.capture.clone());
+            .unwrap_or_else(|| "Unavailable".into());
+        if let Some(tray) = &self.tray {
+            tray.update_capture_hotkey(self.registered_hotkey.as_deref());
+        }
+    }
+
+    fn minimize_capture_windows(&mut self) {
+        if let Some(home) = &self.launcher {
+            self.restore_home_on_cancel |= snipping_tool_ul::ui::minimize_for_capture(&home.window);
+        }
+        if let Some(window) = &self.overlay_window {
+            self.restore_home_on_cancel |= snipping_tool_ul::ui::minimize_for_capture(window);
+        }
+        if let Some(settings) = &self.settings_window {
+            snipping_tool_ul::ui::minimize_for_capture(&settings.window);
+        }
+        if let Some(history) = &self.history_window {
+            snipping_tool_ul::ui::minimize_for_capture(&history.window);
+        }
+        if let Some(about) = &self.about_window {
+            snipping_tool_ul::ui::minimize_for_capture(&about.window);
+        }
+    }
+
+    fn restore_capture_canvas(&mut self, event_loop: &ActiveEventLoop) {
+        // A cancelled timer retains the previous image and its annotations.
+        if self.is_preview {
+            if let Some(window) = &self.overlay_window {
+                snipping_tool_ul::ui::restore_after_capture(window);
+                window.focus_window();
+                self.needs_redraw = true;
+                window.request_redraw();
+                return;
+            }
+        }
+        self.show_home(event_loop);
     }
 
     fn trigger_capture(&mut self, _event_loop: &ActiveEventLoop) {
@@ -598,27 +628,15 @@ impl App {
             return;
         }
         self.image_revision = self.image_revision.wrapping_add(1);
+        self.minimize_capture_windows();
         self.about_window = None;
         #[cfg(target_os = "windows")]
         {
             if self.picker_active {
                 return;
             }
-            // Previous previews are closed before selecting so they cannot be
-            // accidentally included in the next screenshot.
-            self.restore_home_on_cancel |= self
-                .launcher
-                .as_ref()
-                .is_some_and(|h| h.window.is_visible().unwrap_or(false));
-            // Hide first so nothing of ours can land in the screenshot, start
-            // the picker, then release previous render buffers while its worker
-            // captures the frozen desktop before showing selection windows.
-            if let Some(home) = &self.launcher {
-                home.window.set_visible(false);
-            }
-            if let Some(window) = &self.overlay_window {
-                window.set_visible(false);
-            }
+            // All UL controls are already minimized and hidden. The worker
+            // flushes their removal before acquiring the frozen desktop.
             self.countdown = None;
             self.capture_at = None;
             let mode = self.capture_mode;
@@ -853,6 +871,11 @@ impl App {
                 self.is_preview = true;
                 self.needs_redraw = true;
                 self.render();
+                // Activate only after capture/copy and the first visible frame.
+                // Ordinary redraws must never steal focus back from another app.
+                if let Some(window) = &self.overlay_window {
+                    snipping_tool_ul::ui::activate_completed_preview(window);
+                }
                 Ok(())
             }
             Err(error) => Err(error),
@@ -861,7 +884,7 @@ impl App {
 
     fn open_settings(&mut self, event_loop: &ActiveEventLoop) {
         if let Some(sw) = &self.settings_window {
-            sw.window.set_minimized(false);
+            snipping_tool_ul::ui::restore_after_capture(&sw.window);
             sw.window.focus_window();
             return;
         }
@@ -960,7 +983,7 @@ impl App {
     fn open_history(&mut self, event_loop: &ActiveEventLoop) {
         if let Some(history) = &mut self.history_window {
             history.refresh();
-            history.window.set_minimized(false);
+            snipping_tool_ul::ui::restore_after_capture(&history.window);
             history.window.focus_window();
             return;
         }
@@ -1514,6 +1537,7 @@ impl App {
                     } else {
                         10
                     };
+                    self.minimize_capture_windows();
                     self.countdown = Countdown::start(event_loop, seconds);
                     if self.countdown.is_none() {
                         self.trigger_capture(event_loop);
@@ -1540,7 +1564,7 @@ impl App {
                     self.open_settings(event_loop);
                 } else if event.id == tray.about_id {
                     if let Some(about) = &self.about_window {
-                        about.window.set_minimized(false);
+                        snipping_tool_ul::ui::restore_after_capture(&about.window);
                         about.show();
                     } else {
                         match snipping_tool_ul::about::AboutWindow::new(event_loop) {
@@ -1612,6 +1636,10 @@ impl App {
     }
 
     fn render(&mut self) {
+        if self.picker_active || self.countdown.is_some() || self.capture_at.is_some() {
+            self.needs_redraw = false;
+            return;
+        }
         if self.is_preview {
             self.render_preview();
             return;
@@ -2131,7 +2159,7 @@ impl ApplicationHandler<UserEvent> for App {
                         if self.cli_only {
                             event_loop.exit();
                         } else if restore_home {
-                            self.show_home(event_loop);
+                            self.restore_capture_canvas(event_loop);
                         }
                     }
                     Err(error) => {
@@ -2143,7 +2171,7 @@ impl ApplicationHandler<UserEvent> for App {
                         if self.cli_only {
                             event_loop.exit();
                         } else if restore_home {
-                            self.show_home(event_loop);
+                            self.restore_capture_canvas(event_loop);
                         }
                     }
                 }
@@ -2159,6 +2187,7 @@ impl ApplicationHandler<UserEvent> for App {
                 match tray::create_tray() {
                     Ok(t) => {
                         tracing::info!("Tray icon created");
+                        t.update_capture_hotkey(self.registered_hotkey.as_deref());
                         self.tray = Some(t);
                     }
                     Err(e) => {
@@ -2598,7 +2627,7 @@ impl ApplicationHandler<UserEvent> for App {
                         self.countdown = None;
                         self.capture_at = None; // cancel the delayed capture
                         if std::mem::take(&mut self.restore_home_on_cancel) {
-                            self.show_home(_event_loop);
+                            self.restore_capture_canvas(_event_loop);
                         }
                         return;
                     }
@@ -2608,9 +2637,9 @@ impl ApplicationHandler<UserEvent> for App {
                     {
                         self.countdown = None;
                         self.capture_at = None;
-                        // New hid the home window; a cancelled timer brings it back.
+                        // Restore the canvas without discarding the previous image.
                         if std::mem::take(&mut self.restore_home_on_cancel) {
-                            self.show_home(_event_loop);
+                            self.restore_capture_canvas(_event_loop);
                         }
                         return;
                     }

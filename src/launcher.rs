@@ -13,6 +13,7 @@ use winit::{
 };
 pub const WIDTH: u32 = 660;
 pub const HEIGHT: u32 = 372;
+pub const COMPACT_HEIGHT: u32 = 112;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CaptureMode {
     #[default]
@@ -115,6 +116,15 @@ impl Model {
             hovered: None,
             keyboard_focus: false,
             icons: RefCell::new(IconCache::new()),
+        }
+    }
+    /// The empty launcher is a command strip, not an unused image canvas.
+    /// Expand for menus so every existing row remains reachable.
+    pub fn height(&self) -> u32 {
+        if self.connecting || self.menu != Menu::None {
+            HEIGHT
+        } else {
+            COMPACT_HEIGHT
         }
     }
     pub fn bar_targets(&self, w: f32, editor: bool) -> Vec<Target> {
@@ -684,35 +694,27 @@ impl Model {
                 self.hovered == Some(Action::CancelConnection),
                 true,
             );
-        } else {
-            c.icon("crop", 314., 132., 32., ui::muted());
-            c.centered(330., 193., "Select an area to capture", 15., ui::ink());
-            let mut x = 265.;
-            for key in self.hotkey.split('+') {
-                let width = crate::ui::measure(key, 11. * scale) / scale + 16.;
-                c.round(Rect::new(x, 221., width, 24.), 5., ui::muted(), 0.08);
-                c.centered(x + width / 2., 226., key, 11., ui::muted());
-                x += width + 5.;
+        } else if self.menu == Menu::None {
+            let shortcut = format!("Shortcut  {}", self.hotkey);
+            c.label(20., 77., &shortcut, 12., ui::ink());
+            let label = if self.status.is_empty() {
+                if self.workflow.open_preview {
+                    "Copies immediately · Opens preview"
+                } else {
+                    "Copies immediately · Preview off"
+                }
+            } else {
+                &self.status
+            };
+            // Bound the status so it cannot collide with long/custom hotkeys.
+            let available =
+                (638. - 20. - ui::measure(&shortcut, 12. * scale) / scale - 24.).max(0.);
+            let mut label: String = label.chars().take(48).collect();
+            while ui::measure(&label, 11. * scale) / scale > available {
+                label.pop();
             }
-        }
-        c.round(Rect::new(18., 329., 624., 1.), 0., ui::muted(), 0.12);
-        c.icon("copy", 21., 343., 14., ui::muted());
-        c.label(44., 345., "Copies immediately", 11., ui::muted());
-        let label = if self.workflow.open_preview {
-            "Preview opens automatically"
-        } else {
-            "Preview off"
-        };
-        let width = ui::measure(label, 11. * scale) / scale;
-        c.label(638. - width, 345., label, 11., ui::muted());
-        if !self.status.is_empty() {
-            c.centered(
-                330.,
-                298.,
-                &self.status.chars().take(80).collect::<String>(),
-                11.,
-                ui::muted(),
-            );
+            let width = ui::measure(&label, 11. * scale) / scale;
+            c.label(638. - width, 78., &label, 11., ui::muted());
         }
         if !self.connecting {
             self.render_menu(&mut c, WIDTH as f32);
@@ -759,22 +761,28 @@ impl LauncherWindow {
                 .create_window(
                     WindowAttributes::default()
                         .with_title("Snipping Tool UL")
-                        .with_inner_size(winit::dpi::LogicalSize::new(WIDTH, HEIGHT))
+                        .with_inner_size(winit::dpi::LogicalSize::new(WIDTH, model.height()))
                         .with_resizable(false)
                         .with_visible(false),
                 )
                 .map_err(|e| e.to_string())?,
         );
         let surface = crate::native_surface::Surface::new(window.clone())?;
+        let height = model.height();
         Ok(Self {
             window,
             surface,
-            pixmap: Pixmap::new(WIDTH, HEIGHT).ok_or("Home allocation failed")?,
+            pixmap: Pixmap::new(WIDTH, height).ok_or("Home allocation failed")?,
             model,
             pointer: Point::new(-1., -1.),
         })
     }
     pub fn render(&mut self) -> Result<(), String> {
+        let desired = winit::dpi::LogicalSize::new(WIDTH, self.model.height())
+            .to_physical::<u32>(self.window.scale_factor());
+        if self.window.inner_size() != desired {
+            let _ = self.window.request_inner_size(desired);
+        }
         let s = self.window.inner_size();
         if s.width == 0 || s.height == 0 {
             return Ok(());
@@ -787,7 +795,9 @@ impl LauncherWindow {
     }
     pub fn point(&self, x: f64, y: f64) -> Point {
         let s = self.window.inner_size();
-        crate::preview::image_point(x, y, WIDTH, HEIGHT, s.width, s.height)
+        // Match Canvas's width-based DPI scale, including a pending height change.
+        let scale = s.width.max(1) as f64 / WIDTH as f64;
+        Point::new((x / scale) as f32, (y / scale) as f32)
     }
 }
 pub fn style_window(window: &Window) -> bool {

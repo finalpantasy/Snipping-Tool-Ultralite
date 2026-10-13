@@ -145,10 +145,17 @@ fn thickness_clamping() {
 }
 
 #[test]
-fn theme_defaults_to_dark() {
+fn theme_defaults_to_light_and_preserves_saved_dark_choice() {
     let cfg = snipping_tool_ul::config::Config::default();
-    assert_eq!(cfg.general.theme, "dark");
-    assert_eq!(cfg.theme_mode(), snipping_tool_ul::theme::ThemeMode::Dark);
+    assert_eq!(cfg.general.theme, "light");
+    assert_eq!(cfg.theme_mode(), snipping_tool_ul::theme::ThemeMode::Light);
+    let missing: Config = toml::from_str("[general]\nsave_directory = ''").unwrap();
+    assert_eq!(
+        missing.theme_mode(),
+        snipping_tool_ul::theme::ThemeMode::Light
+    );
+    let saved: Config = toml::from_str("[general]\ntheme = 'DaRk'").unwrap();
+    assert_eq!(saved.theme_mode(), snipping_tool_ul::theme::ThemeMode::Dark);
 }
 
 #[test]
@@ -157,5 +164,5 @@ fn theme_mode_parses_light_case_insensitively() {
     cfg.general.theme = "Light".to_string();
     assert_eq!(cfg.theme_mode(), snipping_tool_ul::theme::ThemeMode::Light);
     cfg.general.theme = "garbage".to_string();
-    assert_eq!(cfg.theme_mode(), snipping_tool_ul::theme::ThemeMode::Dark);
+    assert_eq!(cfg.theme_mode(), snipping_tool_ul::theme::ThemeMode::Light);
 }

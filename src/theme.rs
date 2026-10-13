@@ -12,7 +12,7 @@ pub enum ThemeMode {
     Light,
 }
 
-static ACTIVE: AtomicU8 = AtomicU8::new(0); // 0 = Dark, 1 = Light
+static ACTIVE: AtomicU8 = AtomicU8::new(1); // Light by default; 0 = Dark, 1 = Light
 
 pub fn set_mode(mode: ThemeMode) {
     let v = match mode {
@@ -51,7 +51,7 @@ struct Palette {
     violet: Rgb,
 }
 
-// Graphite interface palette — dark (default).
+// Graphite interface palette — optional dark mode.
 const DARK: Palette = Palette {
     bg_0: (15, 25, 29),
     bg_1: (20, 32, 37),

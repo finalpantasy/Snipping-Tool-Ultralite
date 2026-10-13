@@ -3,8 +3,10 @@
 ## Capture and edit
 
 - Region, window and full-screen capture; configurable hotkeys and 3/5/10-second timers.
+- UL minimizes its canvas and hides its controls before capture, including before a timer starts. Cancelling a timer restores the previous preview. The tray tooltip and **Capture screenshot** menu show the registered hotkey, including a fallback when the chosen binding is unavailable.
 - Capture freezes a snapshot of the desktop when selection begins. Select from that still image, so advancing video frames or later popups cannot change the resulting snip. With a timer, the snapshot is taken after the countdown. The temporary full-desktop image is released when the selection finishes or is cancelled.
 - Image clipboard output for pasting into chats. Copy updates annotations without closing the preview.
+- After capture and the initial clipboard attempt, the preview opens in front and is ready for editing. It stays hidden during selection; later redraws do not pull focus back from another app.
 - Middle-mouse drag pans the image; pointer-centered wheel zoom scales it. Ctrl+0 resets the view; **Space** recenters and fits the image while Select is active. Export keeps the original resolution.
 - Smooth pencil strokes, arrows, shapes, word highlights, pixelation, text and numbered steps.
 - Live width and size controls: slider, numeric box and minus/plus buttons. Arrowheads scale with width.
@@ -59,3 +61,7 @@ Portable builds remap build-user paths. `-Examples headless_bench` adds the CPU 
 The release includes bounded native capture, hotkey, clipboard-copy status and zoom checks. External-app pasting, timers, mixed-monitor acceptance and a full interactive memory soak remain open. [Current verification](VERIFICATION-0.3.15.md) separates measured evidence from those gaps.
 
 This standalone repository derives from MIT-licensed [HydroShot](https://github.com/Real-Fruit-Snacks/HydroShot). Required attribution remains in [LICENSE](../LICENSE) and [third-party notices](../THIRD_PARTY_NOTICES.md). No upstream Git history is included.
+
+The empty launch window is a compact capture toolbar. Its registered screenshot shortcut stays visible underneath. Dropdowns temporarily expand the window and collapse when dismissed; a completed capture opens the full editor when preview is enabled.
+
+Light mode is the default for new or unspecified preferences. Choose dark mode in Settings if preferred; an existing saved dark choice is preserved.

@@ -179,7 +179,7 @@ fn glass_and_glyph_pixels_are_premultiplied_and_fallback_keeps_channel_order() {
     );
     assert_eq!(
         snipping_tool_ul::ui::opaque_rgb(&[255, 0, 0, 255, 0, 0, 0, 0]),
-        vec![0xff0000, 0x142025]
+        vec![0xff0000, 0xecf4f3]
     );
 }
 #[test]

@@ -3,6 +3,7 @@ use tray_icon::{Icon, TrayIconBuilder};
 
 pub struct TrayState {
     pub capture_id: tray_icon::menu::MenuId,
+    capture_item: MenuItem,
     pub window_capture_id: tray_icon::menu::MenuId,
     pub delay_3_id: tray_icon::menu::MenuId,
     pub delay_5_id: tray_icon::menu::MenuId,
@@ -23,7 +24,7 @@ pub fn create_tray() -> Result<TrayState, String> {
 
     // Create menu with Capture, About, Quit
     let menu = Menu::new();
-    let capture_item = MenuItem::new("Capture", true, None);
+    let capture_item = MenuItem::new("Capture screenshot", true, None);
     let window_capture_item = MenuItem::new("Capture Window", true, None);
     let delay_3_item = MenuItem::new("Capture in 3s", true, None);
     let delay_5_item = MenuItem::new("Capture in 5s", true, None);
@@ -66,6 +67,7 @@ pub fn create_tray() -> Result<TrayState, String> {
 
     Ok(TrayState {
         capture_id,
+        capture_item,
         window_capture_id,
         delay_3_id,
         delay_5_id,
@@ -78,6 +80,29 @@ pub fn create_tray() -> Result<TrayState, String> {
         quit_id,
         _tray: tray,
     })
+}
+
+impl TrayState {
+    pub fn update_capture_hotkey(&self, hotkey: Option<&str>) {
+        let (label, tooltip) = capture_hotkey_text(hotkey);
+        self.capture_item.set_text(label);
+        if let Err(error) = self._tray.set_tooltip(Some(tooltip)) {
+            tracing::warn!("Could not update capture shortcut tooltip: {error}");
+        }
+    }
+}
+
+fn capture_hotkey_text(hotkey: Option<&str>) -> (String, String) {
+    match hotkey {
+        Some(binding) => (
+            format!("Capture screenshot\t{binding}"),
+            format!("Snipping Tool UL\nCapture screenshot: {binding}"),
+        ),
+        None => (
+            "Capture screenshot (hotkey unavailable)".into(),
+            "Snipping Tool UL\nCapture hotkey unavailable. Use New or Settings.".into(),
+        ),
+    }
 }
 
 pub fn tray_rgba(light_taskbar: bool) -> &'static [u8; 32 * 32 * 4] {

@@ -88,14 +88,55 @@ fn main() {
                 let start = Instant::now();
                 surface.present(&p).expect("Present synthetic UI");
                 window.set_visible(true);
-                self.rows.push(serde_json::json!({"cycle":cycle,"theme":if cycle % 2 == 0 {"dark"} else {"light"},"caption_theme_applied":caption_theme_applied,"glass_backend":surface.uses_glass(),"present_ms":start.elapsed().as_secs_f64()*1000.,"working_set_bytes":memory(),"frame_bytes":p.data().len()}));
+                let present_ms = start.elapsed().as_secs_f64() * 1000.;
+                let minimize_start = Instant::now();
+                assert!(snipping_tool_ul::ui::minimize_for_capture(&window));
+                assert_eq!(window.is_minimized(), Some(true));
+                assert_eq!(window.is_visible(), Some(false));
+                assert!(!snipping_tool_ul::ui::minimize_for_capture(&window));
+                assert_eq!(window.is_visible(), Some(false));
+                let minimize_ms = minimize_start.elapsed().as_secs_f64() * 1000.;
+                use windows::Win32::{
+                    Foundation::HWND,
+                    Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED},
+                };
+                use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                let RawWindowHandle::Win32(raw) = window.window_handle().unwrap().as_raw() else {
+                    panic!("Win32 probe window")
+                };
+                let hwnd = HWND(raw.hwnd.get() as _);
+                let mut cloaked = 0u32;
+                unsafe {
+                    DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut _ as _, 4)
+                        .expect("Capture cloak state");
+                }
+                assert_ne!(cloaked & 1, 0, "Own cloak suppresses compositor ghosts");
+                // A late queued paint must not make capture controls reappear.
+                surface.present(&p).expect("Late synthetic redraw");
+                assert_eq!(window.is_visible(), Some(false));
+                unsafe {
+                    DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut _ as _, 4)
+                        .expect("Cloak survives late paint");
+                }
+                assert_ne!(cloaked & 1, 0);
+                snipping_tool_ul::ui::restore_after_capture(&window);
+                assert_eq!(window.is_visible(), Some(true));
+                assert_eq!(window.is_minimized(), Some(false));
+                unsafe {
+                    DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut _ as _, 4)
+                        .expect("Restored cloak state");
+                }
+                assert_eq!(cloaked & 1, 0);
+                self.rows.push(serde_json::json!({"cycle":cycle,"theme":if cycle % 2 == 0 {"dark"} else {"light"},"caption_theme_applied":caption_theme_applied,"glass_backend":surface.uses_glass(),"present_ms":present_ms,"minimize_ms":minimize_ms,"minimize_hide_restore_verified":true,"capture_cloak_and_late_redraw_verified":true,"working_set_bytes":memory(),"frame_bytes":p.data().len()}));
                 window.set_visible(false);
                 drop(surface);
                 drop(p);
                 drop(window);
                 let mut about = snipping_tool_ul::about::AboutWindow::new(event_loop)
                     .expect("Private About window");
-                about.show();
+                // About::show requests foreground focus. Keep this offscreen
+                // presentation probe free of native activation/input helpers.
+                about.window.set_visible(true);
                 about.render().expect("About presentation");
                 let closes = about.event(&winit::event::WindowEvent::CloseRequested);
                 assert!(closes, "About close must dismiss the dialog");

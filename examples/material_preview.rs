@@ -5,7 +5,7 @@ use snipping_tool_ul::{
     editor_ui::EditorUi,
     geometry::{Color, Point, Size},
     icons::IconCache,
-    launcher::{Menu, Model, HEIGHT, WIDTH},
+    launcher::{Menu, Model, WIDTH},
     preview::EditorView,
     preview_render::PreviewRenderer,
     settings_ui::{SettingsUi, WIN_H, WIN_W},
@@ -108,7 +108,7 @@ fn main() {
             (Menu::Hosts, "image-hosts"),
         ] {
             home.menu = menu;
-            let mut frame = Pixmap::new(WIDTH, HEIGHT).unwrap();
+            let mut frame = Pixmap::new(WIDTH, home.height()).unwrap();
             home.render(&mut frame);
             composite(&frame)
                 .save_png(out.join(format!("{name}-{label}.png")))
@@ -121,7 +121,7 @@ fn main() {
             (Menu::UploadConfirm, "upload-confirm-cooldown"),
         ] {
             home.menu = menu;
-            let mut frame = Pixmap::new(WIDTH, HEIGHT).unwrap();
+            let mut frame = Pixmap::new(WIDTH, home.height()).unwrap();
             home.render(&mut frame);
             composite(&frame)
                 .save_png(out.join(format!("{name}-{label}.png")))
@@ -138,7 +138,7 @@ fn main() {
         ] {
             home.workflow.upload_host = host;
             home.menu = Menu::UploadConfirm;
-            let mut frame = Pixmap::new(WIDTH, HEIGHT).unwrap();
+            let mut frame = Pixmap::new(WIDTH, home.height()).unwrap();
             home.render(&mut frame);
             composite(&frame)
                 .save_png(out.join(format!("{name}-{label}-confirm.png")))
@@ -149,7 +149,7 @@ fn main() {
         home.history_enabled = true;
         home.workflow.confirm_upload = true;
         home.menu = Menu::Options;
-        let mut on = Pixmap::new(WIDTH, HEIGHT).unwrap();
+        let mut on = Pixmap::new(WIDTH, home.height()).unwrap();
         home.render(&mut on);
         composite(&on)
             .save_png(out.join(format!("{name}-options-on.png")))
@@ -239,7 +239,7 @@ fn main() {
         home.menu = Menu::Options;
         home.keyboard_focus = true;
         home.hovered = Some(snipping_tool_ul::launcher::Action::Quit);
-        let mut focused = Pixmap::new(WIDTH * 2, HEIGHT * 2).unwrap();
+        let mut focused = Pixmap::new(WIDTH * 2, home.height() * 2).unwrap();
         home.render(&mut focused);
         composite(&focused)
             .save_png(out.join(format!("{name}-options-quit-200.png")))

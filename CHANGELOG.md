@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.19
+
+- Use light mode for new or unspecified preferences while preserving saved dark-mode choices.
+- Show labelled light-mode app renders on GitHub; remove the separate product page and video.
+
+## 0.3.18
+
+- Open the empty launcher as a compact capture toolbar with the registered hotkey visible underneath. Expand dropdowns while open, then collapse on dismissal; captured images still open the full editor.
+
+## 0.3.17
+
+- Bring a completed capture's preview to the foreground after its first frame is presented. Ordinary redraws do not request focus.
+
+## 0.3.16
+
+- Minimize and hide the canvas and UL dialogs before capture or countdown; retain the previous preview when a timer is cancelled.
+- Suppress capture-window fade transitions and keep hidden controls cloaked against late redraws or reopen events during selection.
+- Show the actual registered screenshot hotkey in the tray tooltip and capture menu, including fallback and unavailable states.
+
 ## 0.3.15 preview
 
 - Keep one active History copy and only the newest pending request, instead of decoding obsolete images in parallel.

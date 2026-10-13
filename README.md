@@ -3,21 +3,15 @@
 <h1 align="center">Snipping Tool UL</h1>
 <p align="center"><strong>Ultralight in performance, not features.</strong><br>A lightweight native Rust snipping tool for Windows 11.</p>
 
-<p align="center"><a href="https://github.com/finalpantasy/Snipping-Tool-UL/releases/download/v0.3.15-preview/Snipping-Tool-UL-0.3.15-Windows-x64.zip"><strong>Download Windows preview</strong></a> · <a href="https://finalpantasy.github.io/Snipping-Tool-UL/">Product page & video</a> · <a href="docs/USAGE.md">User guide</a> · <a href="LICENSE">MIT license</a></p>
+<p align="center"><a href="https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.19-preview/Snipping-Tool-UL-0.3.19-Windows-x64.zip"><strong>Download Windows preview</strong></a> · <a href="docs/USAGE.md">User guide</a> · <a href="LICENSE">MIT license</a></p>
 
-![The real UL editor on Windows 11, showing a fictional captured project brief](docs/media/editor-dark.png)
+![Light-mode editor rendered by the app code using a fictional sample](docs/media/editor-light.png)
+
+*App-code render with sample content, not a native desktop screenshot.*
 
 Take a snip. It is copied immediately, and the preview opens automatically. Paste it into a conversation or keep editing without another button click.
 
-**Native Rust. No webview. No permanent render loop.** Teal frosted controls, a themed title bar, and dark mode by default.
-
-## See it
-
-[![Watch the 32-second native UI product tour](docs/media/demo-poster.png)](https://finalpantasy.github.io/Snipping-Tool-UL/#demo)
-
-[Watch the tour](https://finalpantasy.github.io/Snipping-Tool-UL/#demo) · [Download MP4](docs/media/Snipping-Tool-UL-demo.mp4)
-
-Screenshots and tour use the real Windows app with a fictional sample brief. The tour uses captions, crops and cuts to show the interface; it does not simulate UI actions. Capture, automatic clipboard copy and wheel zoom were exercised during recording. See [media provenance](docs/MEDIA.md).
+**Native Rust. No webview. No permanent render loop.** Teal frosted controls, a themed title bar, and light mode by default, with optional dark mode.
 
 ## The essentials, within reach
 
@@ -34,13 +28,15 @@ Catbox, Freeimage.host and temporary Litterbox sharing need no account or person
 <details>
 <summary>Home keeps capture controls together</summary>
 
-![Real UL home window with New, capture mode, Delay and Options](docs/media/home-dark.png)
+![Compact light-mode home window rendered by the app code](docs/media/home-light.png)
+
+*App-code render. The empty launcher keeps capture controls and the screenshot shortcut visible without a large blank canvas.*
 
 </details>
 
 ## Start using it
 
-1. [Download the Windows x64 ZIP](https://github.com/finalpantasy/Snipping-Tool-UL/releases/download/v0.3.15-preview/Snipping-Tool-UL-0.3.15-Windows-x64.zip) and extract it.
+1. [Download the Windows x64 ZIP](https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.19-preview/Snipping-Tool-UL-0.3.19-Windows-x64.zip) and extract it.
 2. Launch `snipping-tool-ul.exe`.
 3. Choose **New** or press **Ctrl+Shift+S**.
 
@@ -54,7 +50,7 @@ History image copying now keeps one active preparation and only the newest pendi
 
 Two 1,000-call native 4K OCR traces kept live Rust allocations and OS handles flat after warm-up. Windows cache memory still fluctuates. These are component measurements, not total app RAM or a speed comparison against Windows Snipping Tool. [Memory investigation](docs/LEAK-INVESTIGATION-2026-10-13.md)
 
-**0.3.15 is a preview.** The release passed 321 automated tests, plus native OCR lifecycle checks. Broader native workflows, mixed-monitor acceptance, live image-host uploads and a full interactive leak soak remain open. [Release verification](docs/VERIFICATION-0.3.15.md)
+**0.3.19 is a preview.** The release passed 323 automated tests, plus native OCR lifecycle checks. Broader native workflows, mixed-monitor acceptance, live image-host uploads and a full interactive leak soak remain open. [Release verification](docs/VERIFICATION-0.3.19.md)
 
 ## Build and contribute
 
@@ -67,6 +63,6 @@ cargo test --locked
 ./scripts/Build-Portable.ps1
 ```
 
-Portable builds remap machine-specific build paths. Tests use generated content; native GUI checks require isolation or explicit user authorization. Please include your Windows version, display scale and a reproducible sequence in [bug reports](https://github.com/finalpantasy/Snipping-Tool-UL/issues).
+Portable builds remap machine-specific build paths. Tests use generated content; native GUI checks require isolation or explicit user authorization. Please include your Windows version, display scale and a reproducible sequence in [bug reports](https://github.com/finalpantasy/Snipping-Tool-Ultralite/issues).
 
 This standalone project derives from MIT-licensed [HydroShot](https://github.com/Real-Fruit-Snacks/HydroShot). Required attribution is preserved in [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).

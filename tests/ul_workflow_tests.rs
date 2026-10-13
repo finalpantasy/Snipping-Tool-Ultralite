@@ -246,3 +246,51 @@ fn launcher_rasterizes_controls_at_physical_display_scale() {
         );
     }
 }
+
+#[test]
+fn empty_launcher_is_compact_and_menus_expand_then_collapse() {
+    use snipping_tool_ul::launcher::{COMPACT_HEIGHT, HEIGHT, WIDTH};
+    let mut m = Model::new(Default::default(), "Ctrl+Shift+S".into());
+    assert_eq!(m.height(), COMPACT_HEIGHT);
+    assert!(COMPACT_HEIGHT < HEIGHT / 2);
+    for toggle in [
+        Action::ToggleOptions,
+        Action::ToggleModes,
+        Action::ToggleDelay,
+    ] {
+        assert!(m.activate(toggle));
+        assert_eq!(m.height(), HEIGHT);
+        for target in m.menu_targets(WIDTH as f32) {
+            assert!(target.rect.y + target.rect.h < m.height() as f32);
+            assert_eq!(
+                m.hit(Point::new(target.rect.x + 8., target.rect.y + 8.)),
+                Some(target.action)
+            );
+        }
+        assert!(m.activate(Action::Dismiss));
+        assert_eq!(m.height(), COMPACT_HEIGHT);
+    }
+    m.connecting = true;
+    assert_eq!(m.height(), HEIGHT);
+    m.connecting = false;
+    assert_eq!(m.height(), COMPACT_HEIGHT);
+}
+
+#[test]
+fn compact_launcher_keeps_new_and_keyboard_navigation_reachable() {
+    use snipping_tool_ul::launcher::{COMPACT_HEIGHT, WIDTH};
+    let mut m = Model::new(Default::default(), "Alt+PrintScreen".into());
+    for target in m.bar_targets(WIDTH as f32, false) {
+        assert!(target.rect.y + target.rect.h < COMPACT_HEIGHT as f32);
+        assert_eq!(
+            m.hit(Point::new(target.rect.x + 8., target.rect.y + 8.)),
+            Some(target.action)
+        );
+    }
+    assert_eq!(m.enter(WIDTH as f32), Some(Action::New));
+    m.navigate(1, WIDTH as f32);
+    assert_eq!(m.enter(WIDTH as f32), Some(Action::New));
+    m.navigate(1, WIDTH as f32);
+    assert_eq!(m.enter(WIDTH as f32), Some(Action::ToggleModes));
+    assert_eq!(m.hotkey, "Alt+PrintScreen");
+}
