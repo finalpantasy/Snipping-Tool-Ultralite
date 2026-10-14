@@ -5,9 +5,9 @@ use windows::core::w;
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Dwm::DwmFlush;
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CombineRgn, CreateRectRgn, DeleteObject, EndPaint, GetStockObject, SetWindowRgn,
-    StretchDIBits, UpdateWindow, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLACK_BRUSH, DIB_RGB_COLORS,
-    HBRUSH, HDC, HRGN, PAINTSTRUCT, RGN_DIFF, SRCCOPY, WHITE_BRUSH,
+    BeginPaint, ClientToScreen, CombineRgn, CreateRectRgn, DeleteObject, EndPaint, GetStockObject,
+    SetWindowRgn, StretchDIBits, UpdateWindow, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLACK_BRUSH,
+    DIB_RGB_COLORS, HBRUSH, HDC, HRGN, PAINTSTRUCT, RGN_DIFF, SRCCOPY, WHITE_BRUSH,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
@@ -177,11 +177,21 @@ impl Picker {
     }
 }
 
-fn cursor() -> Option<(i32, i32)> {
-    let mut p = POINT::default();
-    unsafe {
-        GetCursorPos(&mut p).ok()?;
-    }
+/// Decodes a packed mouse `LPARAM`; each half is a signed coordinate.
+fn message_point(pos: u32) -> (i32, i32) {
+    (
+        (pos & 0xffff) as u16 as i16 as i32,
+        (pos >> 16) as u16 as i16 as i32,
+    )
+}
+
+/// Screen position carried by the mouse message being handled. A release
+/// must commit where the button went up, not where a still-moving pointer is
+/// by the time a busy UI thread reaches the message (`GetCursorPos`).
+unsafe fn cursor(hwnd: HWND, lp: LPARAM) -> Option<(i32, i32)> {
+    let (x, y) = message_point(lp.0 as u32);
+    let mut p = POINT { x, y };
+    ClientToScreen(hwnd, &mut p).ok().ok()?;
     Some((p.x, p.y))
 }
 
@@ -241,25 +251,25 @@ unsafe extern "system" fn picker_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
     if !pointer.is_null() {
         match msg {
             WM_LBUTTONDOWN => {
-                (*pointer).start = cursor();
+                (*pointer).start = cursor(hwnd, lp);
                 SetCapture(hwnd);
                 // Win32 calls can synchronously re-enter this procedure. Never
                 // keep a borrowed mutable state reference across those calls.
                 let snapshot = *pointer;
-                if let Some(end) = cursor() {
+                if let Some(end) = snapshot.start {
                     update_selection(hwnd, &snapshot, end);
                 }
                 return LRESULT(0);
             }
             WM_MOUSEMOVE => {
                 let snapshot = *pointer;
-                if let Some(end) = cursor() {
+                if let Some(end) = cursor(hwnd, lp) {
                     update_selection(hwnd, &snapshot, end);
                 }
                 return LRESULT(0);
             }
             WM_LBUTTONUP => {
-                let end = cursor();
+                let end = cursor(hwnd, lp);
                 if !(*pointer).finish_click(end) {
                     return LRESULT(0);
                 }
@@ -755,6 +765,24 @@ mod tests {
 
     fn rect_tuple(rect: Option<ScreenRect>) -> Option<(i32, i32, u32, u32)> {
         rect.map(|r| (r.x, r.y, r.width, r.height))
+    }
+
+    fn packed(x: i32, y: i32) -> u32 {
+        ((y as i16 as u16 as u32) << 16) | (x as i16 as u16 as u32)
+    }
+
+    #[test]
+    fn message_position_decodes_signed_virtual_screen_coordinates() {
+        for (x, y) in [
+            (0, 0),
+            (1880, 1120),
+            (-3840, 0),
+            (-1, -1),
+            (7679, 2159),
+            (-3840, -2160),
+        ] {
+            assert_eq!(super::message_point(packed(x, y)), (x, y));
+        }
     }
 
     #[test]
