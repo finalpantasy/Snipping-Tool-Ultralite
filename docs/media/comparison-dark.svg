@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="430" viewBox="0 0 880 430" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+<title id="t">Snipping Tool UL compared with Windows Snipping Tool</title>
+<desc id="d">Start a snip: UL 155 ms, Windows 355 ms; Image on clipboard: UL 50 ms, Windows 76 ms; Open the app: UL 47 ms, Windows 235 ms; Memory while snipping: UL 29 MB, Windows 484 MB; Space on disk: UL 10 MB, Windows 420 MB. Lower is better.</desc>
+<rect x="262" y="18" width="12" height="12" rx="2" fill="#24A3BA"/>
+<text x="280" y="28.5" font-size="14" fill="#E6EDF3" font-weight="600">Snipping Tool UL</text>
+<rect x="422" y="18" width="12" height="12" rx="2" fill="#6A727C"/>
+<text x="440" y="28.5" font-size="14" fill="#E6EDF3">Windows Snipping Tool</text>
+<text x="872" y="28.5" font-size="13" fill="#9198A1" text-anchor="end">Lower is better</text>
+<text x="0" y="78" font-size="15" font-weight="600" fill="#E6EDF3">Start a snip</text>
+<text x="0" y="98" font-size="12.5" fill="#9198A1">hotkey to selection screen</text>
+<path d="M262,64 h179.4 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-179.4 z" fill="#24A3BA"/>
+<text x="453.4" y="76.5" font-size="13" font-weight="600" fill="#E6EDF3">155 ms</text>
+<path d="M262,82 h416.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-416.0 z" fill="#6A727C"/>
+<text x="690.0" y="94.5" font-size="13" font-weight="400" fill="#9198A1">355 ms</text>
+<text x="872" y="86" font-size="15" font-weight="700" fill="#E6EDF3" text-anchor="end">2.3× faster</text>
+<line x1="0" x2="880" y1="122" y2="122" stroke="#3D444D" stroke-width="1"/>
+<text x="0" y="148" font-size="15" font-weight="600" fill="#E6EDF3">Image on clipboard</text>
+<text x="0" y="168" font-size="12.5" fill="#9198A1">after you let go of the mouse</text>
+<path d="M262,134 h272.3 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-272.3 z" fill="#24A3BA"/>
+<text x="546.3" y="146.5" font-size="13" font-weight="600" fill="#E6EDF3">50 ms</text>
+<path d="M262,152 h416.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-416.0 z" fill="#6A727C"/>
+<text x="690.0" y="164.5" font-size="13" font-weight="400" fill="#9198A1">76 ms</text>
+<text x="872" y="156" font-size="15" font-weight="700" fill="#E6EDF3" text-anchor="end">1.5× faster</text>
+<line x1="0" x2="880" y1="192" y2="192" stroke="#3D444D" stroke-width="1"/>
+<text x="0" y="218" font-size="15" font-weight="600" fill="#E6EDF3">Open the app</text>
+<text x="0" y="238" font-size="12.5" fill="#9198A1">launch to window</text>
+<path d="M262,204 h80.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-80.0 z" fill="#24A3BA"/>
+<text x="354.0" y="216.5" font-size="13" font-weight="600" fill="#E6EDF3">47 ms</text>
+<path d="M262,222 h416.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-416.0 z" fill="#6A727C"/>
+<text x="690.0" y="234.5" font-size="13" font-weight="400" fill="#9198A1">235 ms</text>
+<text x="872" y="226" font-size="15" font-weight="700" fill="#E6EDF3" text-anchor="end">5.0× faster</text>
+<line x1="0" x2="880" y1="262" y2="262" stroke="#3D444D" stroke-width="1"/>
+<text x="0" y="288" font-size="15" font-weight="600" fill="#E6EDF3">Memory while snipping</text>
+<text x="0" y="308" font-size="12.5" fill="#9198A1">RAM in use during a capture</text>
+<path d="M262,274 h21.2 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-21.2 z" fill="#24A3BA"/>
+<text x="295.2" y="286.5" font-size="13" font-weight="600" fill="#E6EDF3">29 MB</text>
+<path d="M262,292 h416.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-416.0 z" fill="#6A727C"/>
+<text x="690.0" y="304.5" font-size="13" font-weight="400" fill="#9198A1">484 MB</text>
+<text x="872" y="296" font-size="15" font-weight="700" fill="#E6EDF3" text-anchor="end">17× less</text>
+<line x1="0" x2="880" y1="332" y2="332" stroke="#3D444D" stroke-width="1"/>
+<text x="0" y="358" font-size="15" font-weight="600" fill="#E6EDF3">Space on disk</text>
+<text x="0" y="378" font-size="12.5" fill="#9198A1">installed size</text>
+<path d="M262,344 h6.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-6.0 z" fill="#24A3BA"/>
+<text x="280.0" y="356.5" font-size="13" font-weight="600" fill="#E6EDF3">10 MB</text>
+<path d="M262,362 h416.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-416.0 z" fill="#6A727C"/>
+<text x="690.0" y="374.5" font-size="13" font-weight="400" fill="#9198A1">420 MB</text>
+<text x="872" y="366" font-size="15" font-weight="700" fill="#E6EDF3" text-anchor="end">42× smaller</text>
+</svg>
