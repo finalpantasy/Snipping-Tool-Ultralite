@@ -5,9 +5,7 @@
 
 <p align="center"><a href="https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.21-preview/Snipping-Tool-UL-0.3.21-Windows-x64.zip"><strong>Download Windows preview</strong></a> · <a href="docs/USAGE.md">User guide</a> · <a href="LICENSE">MIT license</a></p>
 
-![Light-mode editor rendered by the app code using a fictional sample](docs/media/editor-light.png)
-
-*App-code render with sample content, not a native desktop screenshot.*
+![Snipping Tool UL light-mode editor](docs/media/editor-light.png)
 
 Take a snip. It is copied immediately, and the preview opens automatically. Paste it into a conversation or keep editing without another button click.
 
@@ -28,18 +26,18 @@ Catbox, Freeimage.host and temporary Litterbox sharing need no account or person
 <details>
 <summary>Home keeps capture controls together</summary>
 
-![Compact light-mode home window rendered by the app code](docs/media/home-light.png)
+![Compact light-mode home window](docs/media/home-light.png)
 
-*App-code render. The empty launcher keeps capture controls and the screenshot shortcut visible without a large blank canvas.*
+*The launcher keeps capture controls and the screenshot shortcut visible without a large blank canvas.*
 
 </details>
 
 <details>
 <summary>Upload shows progress and tells you when the link is ready</summary>
 
-![Light-mode upload feedback rendered by the app code using a sample URL](docs/media/upload-light.png)
+![Light-mode upload feedback](docs/media/upload-light.png)
 
-*App-code render with a sample URL; no image was uploaded for this picture. The button shows progress, then confirms **Link copied**. If copying fails, **Copy link** retries using the existing upload.*
+*The button shows progress, then confirms **Link copied**. If copying fails, **Copy link** retries using the existing upload.*
 
 </details>
 
