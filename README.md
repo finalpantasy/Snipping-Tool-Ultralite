@@ -53,9 +53,17 @@ Optional **Settings > Windows > Use as my Snipping Tool** installs for your acco
 
 ## Small by design, measured honestly
 
-History image copying now keeps one active preparation and only the newest pending request. Generated-image measurements reduced requested Rust heap peak from **63.28 to 31.92 MiB at 4K**, and **253.13 to 126.84 MiB at 8K**, while keeping original pixels.
+| Measured component | Result |
+| --- | --- |
+| Local OCR | 17 ms for small text; 48 ms for dense 1080p; 212 ms for dense 4K |
+| OCR invocation improvement | Earlier paired tests: 3.6-33x faster than UL's previous PowerShell path |
+| History thumbnails | 98.9-99.7% lower peak Rust heap allocation at 4K/8K |
+| Original-resolution History copy | Approximately half the previous image heap peak |
+| Annotated pan / pixelation-heavy zoom | 22% / 28% less renderer processing time |
 
-Two 1,000-call native 4K OCR traces kept live Rust allocations and OS handles flat after warm-up. Windows cache memory still fluctuates. These are component measurements, not total app RAM or a speed comparison against Windows Snipping Tool. [Memory investigation](docs/LEAK-INVESTIGATION-2026-10-13.md)
+Two 1,000-call native 4K OCR traces kept live Rust allocations and OS handles flat after warm-up. Windows cache memory still fluctuates. These are generated-image component tests; heap allocation and committed memory are not total physical RAM, and renderer timings are not complete UI latency.
+
+**Microsoft's stock Snipping Tool has not been benchmarked directly.** The measured gains compare UL with its earlier implementations. [Performance results, methods and stock-comparison status](docs/PERFORMANCE.md)
 
 **0.3.21 is a preview.** The release passed 328 automated tests, plus native OCR lifecycle checks. Broader native workflows, mixed-monitor acceptance, live image-host uploads and a full interactive leak soak remain open. [Release verification](docs/VERIFICATION-0.3.21.md)
 
