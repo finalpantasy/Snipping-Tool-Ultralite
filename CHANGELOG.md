@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.26 preview
+
+- Faster snips: the screen is captured once and drawn as it is, and only the area you select is converted. In a live test on three 4K monitors, the selection screen appeared in 141 ms instead of 241 ms, and the image reached the clipboard in 54 ms instead of 83 ms, on the same busy PC.
+- The clipboard is filled before the frozen screen is freed or the editor opens, and peak memory during a snip drops from about 288 MB to about 211 MB on three 4K monitors.
+- Hotkey snips no longer wait a display frame when no Snipping Tool UL window was on screen; they still wait right after any UL window closes, so it never appears in the snip.
+
 ## 0.3.25 preview
 
 - About now has a **Support on Ko-fi** button that opens ko-fi.com/finalpantasy in your browser.

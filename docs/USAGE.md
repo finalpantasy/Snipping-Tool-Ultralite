@@ -61,7 +61,7 @@ cargo test --locked
 
 Portable builds remap build-user paths. `-Examples headless_bench` adds the CPU benchmark helper. `cargo run --example editing_preview` and `cargo run --example settings_preview` render actual UI code with synthetic images, without windows, capture, clipboard writes or uploads. Set `SNIPPING_TOOL_UL_CONFIG_DIR` to an isolated test directory.
 
-The release includes bounded native capture, hotkey, clipboard-copy status and zoom checks. External-app pasting, timers, mixed-monitor acceptance and a full interactive memory soak remain open. [Current verification](VERIFICATION-0.3.25.md) separates measured evidence from those gaps.
+The release includes bounded native capture, hotkey, clipboard-copy status and zoom checks. External-app pasting, timers, mixed-monitor acceptance and a full interactive memory soak remain open. [Current verification](VERIFICATION-0.3.26.md) separates measured evidence from those gaps.
 
 This standalone repository derives from MIT-licensed [HydroShot](https://github.com/Real-Fruit-Snacks/HydroShot). Required attribution remains in [LICENSE](../LICENSE) and [third-party notices](../THIRD_PARTY_NOTICES.md). No upstream Git history is included.
 

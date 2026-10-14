@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.25-preview/Snipping-Tool-UL-0.3.25-Windows-x64.zip"><b>Download for Windows</b></a>
+  <a href="https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.26-preview/Snipping-Tool-UL-0.3.26-Windows-x64.zip"><b>Download for Windows</b></a>
   &nbsp;·&nbsp; <a href="docs/USAGE.md">User guide</a>
   &nbsp;·&nbsp; <a href="CHANGELOG.md">What's new</a>
 </p>
@@ -62,7 +62,7 @@ Flameshot asks which monitor to use before every snip on a PC with more than one
 
 ## Get started in 30 seconds
 
-1. [Download the ZIP](https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.25-preview/Snipping-Tool-UL-0.3.25-Windows-x64.zip) and unzip it anywhere.
+1. [Download the ZIP](https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.26-preview/Snipping-Tool-UL-0.3.26-Windows-x64.zip) and unzip it anywhere.
 2. Double-click `snipping-tool-ul.exe`.
 3. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>, drag over what you want, and paste.
 
@@ -109,7 +109,7 @@ cargo test --locked
 
 ## Status
 
-0.3.25 is a preview release. Not yet verified: monitors with mixed scaling, live uploads to every host, and memory use over very long sessions. [Release checks](docs/VERIFICATION-0.3.25.md)
+0.3.26 is a preview release. Not yet verified: monitors with mixed scaling, live uploads to every host, and memory use over very long sessions. [Release checks](docs/VERIFICATION-0.3.26.md)
 
 Found a bug? [Open an issue](https://github.com/finalpantasy/Snipping-Tool-Ultralite/issues) with your Windows version, display scaling and the steps that cause it.
 
