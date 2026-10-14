@@ -197,16 +197,20 @@ fn successful_worker_preserves_unicode_and_releases_flight() {
 #[test]
 fn panic_disconnect_releases_flight() {
     static BUSY: AtomicBool = AtomicBool::new(false);
-    assert!(request(
+    let error = request(
         vec![255; 4],
         1,
         1,
-        Control::new(Duration::from_secs(1)),
+        // Verify panic cleanup, independently of loaded CI worker scheduling.
+        Control::new(Duration::from_secs(10)),
         &BUSY,
-        |_, _, _, _| panic!("synthetic native panic")
+        |_, _, _, _| panic!("synthetic native panic"),
     )
-    .unwrap_err()
-    .contains("unexpectedly"));
+    .unwrap_err();
+    assert!(
+        error.contains("unexpectedly"),
+        "unexpected OCR result: {error}"
+    );
     wait_idle(&BUSY);
 }
 

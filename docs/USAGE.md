@@ -9,6 +9,7 @@
 - After capture and the initial clipboard attempt, the preview opens in front and is ready for editing. It stays hidden during selection; later redraws do not pull focus back from another app.
 - Middle-mouse drag pans the image; pointer-centered wheel zoom scales it. Ctrl+0 resets the view; **Space** recenters and fits the image while Select is active. Export keeps the original resolution.
 - Smooth pencil strokes, arrows, shapes, word highlights, pixelation, text and numbered steps.
+- Draw beyond any image edge to grow the canvas with white space. Moving, resizing or deleting annotations shrinks unused space again, down to the original image size. Undo and redo restore the matching canvas. The image stays steady while drawing; use zoom and middle-mouse pan to reach further. Copy, Save, Upload and Pin include the complete canvas.
 - Live width and size controls: slider, numeric box and minus/plus buttons. Arrowheads scale with width.
 - Text uses Open Sans, with a visible size control. Ordinary scrolling stays zoom.
 - **Select** (V) selects annotations to move, resize or change; it does not pan the image. Click targets keep a consistent screen size at any zoom. Right-click a numbered step to delete it; later steps renumber. Undo restores the whole change.
@@ -58,7 +59,7 @@ cargo test --locked
 
 Portable builds remap build-user paths. `-Examples headless_bench` adds the CPU benchmark helper. `cargo run --example editing_preview` and `cargo run --example settings_preview` render actual UI code with synthetic images, without windows, capture, clipboard writes or uploads. Set `SNIPPING_TOOL_UL_CONFIG_DIR` to an isolated test directory.
 
-The release includes bounded native capture, hotkey, clipboard-copy status and zoom checks. External-app pasting, timers, mixed-monitor acceptance and a full interactive memory soak remain open. [Current verification](VERIFICATION-0.3.15.md) separates measured evidence from those gaps.
+The release includes bounded native capture, hotkey, clipboard-copy status and zoom checks. External-app pasting, timers, mixed-monitor acceptance and a full interactive memory soak remain open. [Current verification](VERIFICATION-0.3.22.md) separates measured evidence from those gaps.
 
 This standalone repository derives from MIT-licensed [HydroShot](https://github.com/Real-Fruit-Snacks/HydroShot). Required attribution remains in [LICENSE](../LICENSE) and [third-party notices](../THIRD_PARTY_NOTICES.md). No upstream Git history is included.
 

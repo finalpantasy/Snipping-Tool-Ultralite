@@ -591,7 +591,8 @@ impl EditorUi {
                 ui::muted(),
             );
         }
-        let size = format!("{} x {}", state.screenshot.width, state.screenshot.height);
+        let bounds = state.editor_canvas_bounds();
+        let size = format!("{:.0} x {:.0}", bounds.width, bounds.height);
         let tw = ui::measure(&size, 11. * dpi) / dpi;
         c.label(w - 22. - tw, h - 25., &size, 11., ui::muted());
         if self.header.menu == Menu::Annotation {

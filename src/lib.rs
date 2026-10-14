@@ -1,6 +1,7 @@
 pub mod about;
 pub mod autostart;
 pub mod background;
+pub mod canvas;
 pub mod capture;
 pub mod cli;
 pub mod clipboard_queue;

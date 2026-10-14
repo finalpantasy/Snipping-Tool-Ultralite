@@ -189,12 +189,12 @@ fn draw_pixelation(
     else {
         return;
     };
-    let x = top_left.x.max(0.) as u32;
-    let y = top_left.y.max(0.) as u32;
-    let w = ((size.width + top_left.x.min(0.)).max(0.) as u32).min(screen.width.saturating_sub(x));
-    let h =
-        ((size.height + top_left.y.min(0.)).max(0.) as u32).min(screen.height.saturating_sub(y));
-    if w == 0 || h == 0 || !scale.is_finite() || scale <= 0. {
+    let Some((x, y, w, h)) =
+        crate::canvas::source_region(*top_left, *size, screen.width, screen.height)
+    else {
+        return;
+    };
+    if !scale.is_finite() || scale <= 0. {
         return;
     }
     let key = PixelationKey {
@@ -491,15 +491,18 @@ impl PreviewRenderer {
         );
         // Sampling uses pixel centers. Keep a border pixel whenever its center
         // lies in the image, including subpixel-sized images at distant zoom.
-        let x0 = (l.x.max(well.x as f64 * dpi).max(0.) - 0.5).ceil().max(0.) as u32;
-        let y0 = (l.y.max(well.y as f64 * dpi).max(0.) - 0.5).ceil().max(0.) as u32;
-        let x1 = ((l.x + screen.width as f64 * l.scale)
+        let bounds = state.editor_canvas_bounds();
+        let left = l.x + bounds.x as f64 * l.scale;
+        let top = l.y + bounds.y as f64 * l.scale;
+        let x0 = (left.max(well.x as f64 * dpi).max(0.) - 0.5).ceil().max(0.) as u32;
+        let y0 = (top.max(well.y as f64 * dpi).max(0.) - 0.5).ceil().max(0.) as u32;
+        let x1 = ((left + bounds.width as f64 * l.scale)
             .min((well.x + well.w) as f64 * dpi)
             .min(frame.width() as f64)
             - 0.5)
             .ceil()
             .max(0.) as u32;
-        let y1 = ((l.y + screen.height as f64 * l.scale)
+        let y1 = ((top + bounds.height as f64 * l.scale)
             .min((well.y + well.h) as f64 * dpi)
             .min(frame.height() as f64)
             - 0.5)
@@ -549,11 +552,25 @@ impl PreviewRenderer {
             let Some(base) = &mut self.base else {
                 return;
             };
+            // Only the canvas intersection is retained. Growth never allocates
+            // a full-resolution image while dragging, and the image transform
+            // stays fixed so the pointer does not chase a shifting canvas.
+            base.fill(tiny_skia::Color::WHITE);
+            let image_x0 = ((l.x - 0.5).ceil().max(x0 as f64).min(x1 as f64)) as u32;
+            let image_x1 = ((l.x + screen.width as f64 * l.scale - 0.5)
+                .ceil()
+                .max(x0 as f64)
+                .min(x1 as f64)) as u32;
+            let image_y0 = ((l.y - 0.5).ceil().max(y0 as f64).min(y1 as f64)) as u32;
+            let image_y1 = ((l.y + screen.height as f64 * l.scale - 0.5)
+                .ceil()
+                .max(y0 as f64)
+                .min(y1 as f64)) as u32;
             // Each source coordinate is calculated once per axis, not per pixel.
             // Keep the same f32 blend order as the previous bilinear sampler.
-            let xs: Vec<_> = (0..w)
+            let xs: Vec<_> = (image_x0..image_x1)
                 .map(|x| {
-                    let sx = ((x0 as f64 + x as f64 + 0.5 - l.x) / l.scale - 0.5)
+                    let sx = ((x as f64 + 0.5 - l.x) / l.scale - 0.5)
                         .clamp(0., screen.width.saturating_sub(1) as f64);
                     let ix = sx.floor() as u32;
                     (
@@ -565,15 +582,15 @@ impl PreviewRenderer {
                 .collect();
             let stride = screen.width as usize * 4;
             let data = base.data_mut();
-            for y in 0..h {
-                let sy = ((y0 as f64 + y as f64 + 0.5 - l.y) / l.scale - 0.5)
+            for y in image_y0..image_y1 {
+                let sy = ((y as f64 + 0.5 - l.y) / l.scale - 0.5)
                     .clamp(0., screen.height.saturating_sub(1) as f64);
                 let iy = sy.floor() as u32;
                 let row = iy as usize * stride;
                 let next = (iy + 1).min(screen.height - 1) as usize * stride;
                 let fy = (sy - iy as f64) as f32;
-                let start = y as usize * w as usize * 4;
-                let output = &mut data[start..start + w as usize * 4];
+                let start = ((y - y0) as usize * w as usize + (image_x0 - x0) as usize) * 4;
+                let output = &mut data[start..start + xs.len() * 4];
                 if opaque {
                     sample_row::<true>(&screen.pixels, output, &xs, row, next, fy);
                 } else {
@@ -687,8 +704,15 @@ fn compose_committed(
         .iter()
         .chain(extra_spot)
         .filter_map(|a| {
-            if let Annotation::Spotlight { .. } = a {
-                Some(transformed(a, c.scale, c.ox, c.oy))
+            if let Annotation::Spotlight { top_left, size } = a {
+                let (x, y, w, h) =
+                    crate::canvas::source_region(*top_left, *size, c.screen.width, c.screen.height)
+                        .unwrap_or((0, 0, 0, 0));
+                let clipped = Annotation::Spotlight {
+                    top_left: Point::new(x as f32, y as f32),
+                    size: crate::geometry::Size::new(w as f32, h as f32),
+                };
+                Some(transformed(&clipped, c.scale, c.ox, c.oy))
             } else {
                 None
             }
@@ -1021,7 +1045,9 @@ mod speed_tests {
         state.text_input_buffer = "synthetic text".into();
         renderer.draw(&state, &mut frame, &view, 1.);
         let live_bytes = renderer.live.as_ref().unwrap().data().len();
-        assert_eq!(renderer.retained_bytes(), idle_bytes + live_bytes);
+        // Live text can grow both base layers as well as adding the live layer.
+        assert!(live_bytes >= idle_bytes / 2);
+        assert_eq!(renderer.retained_bytes(), live_bytes * 3);
         state.text_input_active = false;
         renderer.draw(&state, &mut frame, &view, 1.);
         assert_eq!(renderer.retained_bytes(), idle_bytes);

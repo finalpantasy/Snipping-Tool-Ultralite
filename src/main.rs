@@ -1068,6 +1068,19 @@ impl App {
         tracing::info!("Overlay closed");
     }
 
+    fn report_export_preparation_failure(&mut self, action: &str) {
+        if let AppState::Capturing(ref mut o) = self.state {
+            let message = format!("{action}: {}", o.export_failure_message());
+            o.show_toast(message.clone(), 8000);
+            self.editor_ui.header.status = message.clone();
+            if let Some(home) = &mut self.launcher {
+                home.model.status = message;
+                home.window.request_redraw();
+            }
+            self.needs_redraw = true;
+        }
+    }
+
     fn do_copy(&mut self) {
         if self.copy_pending {
             return;
@@ -1118,6 +1131,8 @@ impl App {
                     close_on_success,
                 });
             });
+        } else {
+            self.report_export_preparation_failure("Copy failed");
         }
     }
 
@@ -1150,21 +1165,7 @@ impl App {
     fn save_chosen_path(&mut self, path: std::path::PathBuf) {
         let save_data = if let AppState::Capturing(ref mut overlay) = self.state {
             overlay.commit_text();
-            overlay.selection.as_ref().and_then(|sel| {
-                let r = sel.clamped(overlay.screenshot.width, overlay.screenshot.height);
-                overlay.raw_selection().map(|(pixels, w, h)| {
-                    (
-                        pixels,
-                        w,
-                        h,
-                        overlay
-                            .annotations
-                            .iter()
-                            .map(|a| export::offset_annotation(a, r.x as f32, r.y as f32))
-                            .collect::<Vec<_>>(),
-                    )
-                })
-            })
+            overlay.export_selection()
         } else {
             // The chooser is not modal: the preview can be closed before a file
             // is picked. Say so instead of silently dropping the choice.
@@ -1218,6 +1219,8 @@ impl App {
                     close_on_success,
                 });
             });
+        } else {
+            self.report_export_preparation_failure("Save failed");
         }
     }
 
@@ -1372,7 +1375,13 @@ impl App {
                 });
             });
         } else {
-            self.set_upload_feedback(UploadFeedback::None);
+            let message = if let AppState::Capturing(ref o) = self.state {
+                o.export_failure_message()
+            } else {
+                "There is no image to upload."
+            };
+            self.set_upload_feedback(UploadFeedback::Failed(message.into()));
+            self.report_export_preparation_failure("Upload failed");
         }
     }
 
@@ -1476,9 +1485,7 @@ impl App {
                 // for the virtual-desktop offset of the captured area (the
                 // selection is in screenshot coordinates, which can start at a
                 // negative virtual-desktop position on multi-monitor setups).
-                if let Some(ref sel) = overlay.selection {
-                    let screen_x = sel.x as i32 + overlay.screenshot.x_offset;
-                    let screen_y = sel.y as i32 + overlay.screenshot.y_offset;
+                if let Some((screen_x, screen_y)) = overlay.export_screen_origin() {
                     if let Some(pin) =
                         PinnedWindow::create(event_loop, &pixels, w, h, screen_x, screen_y)
                     {
@@ -1490,10 +1497,15 @@ impl App {
         }
         if !created {
             if let AppState::Capturing(ref mut o) = self.state {
-                o.show_toast(
-                    "Could not create the pin. Your image is still here; try again.".into(),
-                    8000,
-                );
+                let message = if o
+                    .export_canvas_bounds()
+                    .is_some_and(|b| b.export_size().is_none())
+                {
+                    o.export_failure_message()
+                } else {
+                    "Could not create the pin. Your image is still here; try again."
+                };
+                o.show_toast(message.into(), 8000);
                 self.needs_redraw = true;
             }
             return;
@@ -3706,8 +3718,8 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
 
-                // The preview edits a fixed cropped image. Its padding is not
-                // a new capture surface and its edges cannot resize the crop.
+                // The preview workspace can start annotations outside the image;
+                // the underlying capture selection is still fixed.
                 if self.is_preview && overlay.selection_hit(pos, true).is_none() {
                     return;
                 }

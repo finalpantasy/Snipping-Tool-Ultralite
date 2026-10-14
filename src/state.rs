@@ -183,11 +183,9 @@ impl OverlayState {
 
     pub fn selection_hit(&self, pos: Point, preview: bool) -> Option<HitZone> {
         if preview {
-            (pos.x >= 0.0
-                && pos.y >= 0.0
-                && pos.x < self.screenshot.width as f32
-                && pos.y < self.screenshot.height as f32)
-                .then_some(HitZone::Inside)
+            // The editor's UI bounds the workspace. Padding can start a mark,
+            // but never resizes the underlying screenshot selection.
+            (pos.x.is_finite() && pos.y.is_finite()).then_some(HitZone::Inside)
         } else {
             self.selection
                 .as_ref()
@@ -241,6 +239,14 @@ impl OverlayState {
     /// Returns `(pixels, width, height)`, or `None` if there is no selection
     /// or it has zero area.
     pub fn flattened_selection(&self) -> Option<(Vec<u8>, u32, u32)> {
+        if self.preview_mode {
+            let (pixels, w, h, annotations) = self.export_selection()?;
+            return Some((
+                crate::export::flatten_annotations(&pixels, w, h, &annotations),
+                w,
+                h,
+            ));
+        }
         let sel = self.selection.as_ref()?;
         let r = sel.clamped(self.screenshot.width, self.screenshot.height);
         if r.w == 0 || r.h == 0 {
@@ -256,6 +262,87 @@ impl OverlayState {
             &self.annotations,
         );
         Some((pixels, r.w, r.h))
+    }
+
+    /// Save uses the same canvas as Copy/Upload/Pin, with flattening on its worker.
+    pub fn export_selection(&self) -> Option<(Vec<u8>, u32, u32, Vec<Annotation>)> {
+        let r = self
+            .selection
+            .as_ref()?
+            .clamped(self.screenshot.width, self.screenshot.height);
+        let (pixels, w, h) = self.raw_selection()?;
+        let annotations = self
+            .annotations
+            .iter()
+            .map(|a| crate::export::offset_annotation(a, r.x as f32, r.y as f32))
+            .collect();
+        if self.preview_mode {
+            crate::canvas::prepare_export(pixels, w, h, annotations)
+        } else {
+            Some((pixels, w, h, annotations))
+        }
+    }
+
+    /// Export extents in capture coordinates, excluding unfinished annotations.
+    pub fn export_canvas_bounds(&self) -> Option<crate::canvas::CanvasBounds> {
+        let r = self
+            .selection
+            .as_ref()?
+            .clamped(self.screenshot.width, self.screenshot.height);
+        if r.w == 0 || r.h == 0 {
+            return None;
+        }
+        let mut b = crate::canvas::CanvasBounds {
+            x: r.x as f32,
+            y: r.y as f32,
+            width: r.w as f32,
+            height: r.h as f32,
+        };
+        if self.preview_mode {
+            for a in &self.annotations {
+                b.include(a);
+            }
+        }
+        Some(b)
+    }
+
+    pub fn export_screen_origin(&self) -> Option<(i32, i32)> {
+        let b = self.export_canvas_bounds()?;
+        Some((
+            (b.x as i32).saturating_add(self.screenshot.x_offset),
+            (b.y as i32).saturating_add(self.screenshot.y_offset),
+        ))
+    }
+
+    pub fn export_failure_message(&self) -> &'static str {
+        if self
+            .export_canvas_bounds()
+            .is_some_and(|b| b.export_size().is_none())
+        {
+            "Canvas is too large. Move or resize annotations closer to the image."
+        } else {
+            "Could not prepare the image. Your image is still here; try again."
+        }
+    }
+
+    pub fn editor_canvas_bounds(&self) -> crate::canvas::CanvasBounds {
+        let mut bounds = crate::canvas::bounds(
+            self.screenshot.width,
+            self.screenshot.height,
+            &self.annotations,
+        );
+        if let Some(a) = self.in_progress() {
+            bounds.include(&a);
+        }
+        if self.text_input_active && !self.text_input_buffer.trim().is_empty() {
+            bounds.include(&Annotation::Text {
+                position: self.text_input_position,
+                text: self.text_input_buffer.clone(),
+                color: self.current_color,
+                font_size: self.text_input_font_size,
+            });
+        }
+        bounds
     }
 
     /// Crop the current selection WITHOUT annotations (raw screenshot pixels).

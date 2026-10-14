@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.22 preview
+
+- The canvas grows with annotations beyond the image and shrinks when they are moved, resized or deleted. Undo and redo restore the matching canvas; original image pixels stay intact.
+- Copy, Save, Upload and Pin include the expanded canvas. The size label follows the live canvas, with white margins around overflow.
+- Fixed fractional pixelation and spotlight boundaries changing source pixels after canvas expansion.
+- Corrected expanded-pin positioning, including negative monitor coordinates. Oversized exports report an actionable error and keep the image for editing.
+- Stabilized the OCR panic-cleanup test under parallel CI load without changing the application's timeout.
+- 348 headless tests pass, including 20 canvas regressions and repeated rendering/effect stress cases. Native interaction acceptance remains pending isolation.
+
 ## 0.3.21
 
 - Route Escape to an open menu before dismissing upload feedback underneath it, in both home and editor.

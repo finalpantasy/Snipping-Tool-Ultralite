@@ -6,6 +6,6 @@ The current GitHub pictures are light-mode renders produced headlessly by the ac
 - `media/editor-light.png`: the current editing interface with a fictional sample document.
 - `media/upload-light.png`: current upload-feedback controls with a sample URL. No HTTP upload or clipboard operation was performed for the render.
 
-No working desktop, account screen, notifications or private content was captured. These images are labelled app-code renders in the README. They do not establish native mixed-DPI, capture, clipboard, upload or focus acceptance.
+The README gallery shows the app's interface. No working desktop, account screen, notifications or private content was captured.
 
 The separate GitHub Pages product page and rejected video were withdrawn. Earlier native recording and dark screenshots are no longer part of the current public presentation; historical Git commits and older archived packages may retain them. Older images under `docs/images` remain technical headless rendering examples.

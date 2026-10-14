@@ -86,7 +86,7 @@ fn tiny_preview_fits_every_toolbar_target_below_image() {
     state.canvas_height = height;
     assert!(state
         .selection_hit(Point::new(500.0, 250.0), true)
-        .is_none());
+        .is_some()); // Editor padding can start annotations; UI gates toolbar clicks.
     assert_eq!(
         state.selection_hit(Point::new(1.0, 1.0), true),
         Some(snipping_tool_ul::overlay::selection::HitZone::Inside)
