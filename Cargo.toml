@@ -41,6 +41,8 @@ ring = "0.17"
 # examples/render_design_svg.rs renders design mockups that contain SVG text.
 # Resolver 2 keeps these features out of the shipped binary.
 resvg = "0.44"
+# Tests decode the clipboard CF_DIBV5 bitmap; the BMP codec stays out of the app.
+image = { version = "0.25", default-features = false, features = ["bmp"] }
 
 [build-dependencies]
 winres = "0.1"
@@ -80,6 +82,8 @@ windows = { version = "0.58", features = [
     "Win32_UI_Shell",
     "Win32_Storage_FileSystem",
     "Win32_System_Console",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
     "Win32_System_Threading",
     "Win32_System_JobObjects",
     "Win32_System_StationsAndDesktops",

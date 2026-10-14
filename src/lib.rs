@@ -4,6 +4,7 @@ pub mod background;
 pub mod canvas;
 pub mod capture;
 pub mod cli;
+pub mod clipboard_image;
 pub mod clipboard_queue;
 pub mod color_picker;
 pub mod config;

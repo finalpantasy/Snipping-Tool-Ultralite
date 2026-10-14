@@ -393,7 +393,13 @@ pub fn copy_with_ticket(
     height: u32,
 ) -> Result<bool, String> {
     validate_image(pixels, width, height)?;
-    // Arboard's Windows backend publishes PNG and DIBV5 with bounded busy retries.
+    // Windows: PNG and DIBV5 are built before the clipboard opens, then
+    // published with bounded busy retries.
+    #[cfg(windows)]
+    return crate::clipboard_queue::run(ticket, || {
+        crate::clipboard_image::write(pixels, width, height)
+    });
+    #[cfg(not(windows))]
     crate::clipboard_queue::run(ticket, || {
         use arboard::{Clipboard, ImageData};
 
