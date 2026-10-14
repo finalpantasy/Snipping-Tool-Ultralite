@@ -714,9 +714,10 @@ impl App {
             let mode = self.capture_mode;
             self.picker_active = true;
             let proxy = self.proxy.clone();
-            // A picker hidden moments ago may still be on screen.
-            let flush = flush
-                || snipping_tool_ul::region_picker::dismissed_within(Duration::from_millis(250));
+            // A UL window closed or hidden recently may still be on screen; a
+            // second covers slow composition on a busy PC for one frame's cost.
+            let flush =
+                flush || snipping_tool_ul::ui::window_removed_within(Duration::from_secs(1));
             let picker = std::thread::spawn(move || {
                 // If anything below panics, the guard still reports back so
                 // `picker_active` cannot stay set and block every later capture.
@@ -1034,6 +1035,7 @@ impl App {
                 .set_checked(snipping_tool_ul::autostart::is_enabled());
         }
         self.settings_window = None;
+        snipping_tool_ul::ui::note_window_removed();
         if let Some(about) = &self.about_window {
             about.window.request_redraw();
         }
@@ -1121,6 +1123,7 @@ impl App {
 
     fn close_history(&mut self) {
         self.history_window = None;
+        snipping_tool_ul::ui::note_window_removed();
         tracing::info!("History window closed");
     }
 
@@ -1136,6 +1139,7 @@ impl App {
         self.surface = None;
         self.pixmap = None;
         self.overlay_window = None;
+        snipping_tool_ul::ui::note_window_removed();
         self.state = AppState::Idle;
         self.modifiers = ModifiersState::empty();
         self.window_capture_mode = false;
@@ -2359,6 +2363,7 @@ impl ApplicationHandler<UserEvent> for App {
             if about.window.id() == _window_id {
                 if about.event(&event) {
                     self.about_window = None;
+                    snipping_tool_ul::ui::note_window_removed();
                 }
                 return;
             }
@@ -2375,6 +2380,7 @@ impl ApplicationHandler<UserEvent> for App {
                         _event_loop.exit();
                     }
                     self.launcher = None;
+                    snipping_tool_ul::ui::note_window_removed();
                     return;
                 }
                 WindowEvent::RedrawRequested

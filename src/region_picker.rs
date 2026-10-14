@@ -2,9 +2,6 @@
 //! GDI paints the snapshot's own DIB section; no second full-screen buffer or
 //! full-frame conversion exists.
 use crate::capture::{BgraSnapshot, ScreenRect};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::LazyLock;
-use std::time::{Duration, Instant};
 use windows::core::w;
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
@@ -21,18 +18,6 @@ struct FrozenSurface<'a> {
     veil: HWND,
 }
 
-/// When the last picker windows were hidden, as milliseconds since `EPOCH`.
-static EPOCH: LazyLock<Instant> = LazyLock::new(Instant::now);
-static LAST_DISMISSED_MS: AtomicU64 = AtomicU64::new(u64::MAX);
-
-/// True if picker windows were hidden less than `window` ago. Their removal
-/// may not be on screen yet, so a new capture must wait for DWM first.
-pub fn dismissed_within(window: Duration) -> bool {
-    let last = LAST_DISMISSED_MS.load(Ordering::SeqCst);
-    last != u64::MAX
-        && (EPOCH.elapsed().as_millis() as u64).saturating_sub(last) < window.as_millis() as u64
-}
-
 /// The frozen-screen window. Every exit after it exists records the dismissal.
 struct OwnedWindow(HWND);
 impl Drop for OwnedWindow {
@@ -40,7 +25,7 @@ impl Drop for OwnedWindow {
         unsafe {
             let _ = DestroyWindow(self.0);
         }
-        LAST_DISMISSED_MS.store(EPOCH.elapsed().as_millis() as u64, Ordering::SeqCst);
+        crate::ui::note_window_removed();
     }
 }
 
@@ -266,7 +251,7 @@ unsafe extern "system" fn border_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
 /// Owns all HWNDs/region state on the calling worker thread. Returning means
 /// selection windows were hidden and destroyed. It does not wait for DWM to
 /// present their removal, so the clipboard is not held up by a display
-/// frame; `dismissed_within` lets a following capture wait instead.
+/// frame; `ui::window_removed_within` lets a following capture wait instead.
 pub fn select_region(screen: &BgraSnapshot) -> Result<Option<ScreenRect>, String> {
     select(false, screen, &[])
 }
@@ -692,7 +677,9 @@ mod tests {
     fn dismissal_is_recorded_when_the_frozen_window_is_released() {
         // A null HWND: DestroyWindow fails harmlessly, no window is involved.
         drop(OwnedWindow(HWND::default()));
-        assert!(dismissed_within(Duration::from_secs(60)));
+        assert!(crate::ui::window_removed_within(
+            std::time::Duration::from_secs(60)
+        ));
     }
 
     fn area_picker() -> Picker {

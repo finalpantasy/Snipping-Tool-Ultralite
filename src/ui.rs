@@ -9,6 +9,28 @@ pub const INK: (u8, u8, u8) = (237, 234, 243);
 pub const MUTED: (u8, u8, u8) = (189, 183, 201);
 pub const BASE: (u8, u8, u8) = (36, 35, 41);
 
+/// When any UL window last left the screen, as milliseconds since `REMOVAL_EPOCH`.
+static REMOVAL_EPOCH: std::sync::LazyLock<std::time::Instant> =
+    std::sync::LazyLock::new(std::time::Instant::now);
+static LAST_REMOVED_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
+
+/// Record that a UL window was closed or hidden. DWM may not have presented
+/// its removal yet, so a capture soon after must wait a frame first.
+pub fn note_window_removed() {
+    LAST_REMOVED_MS.store(
+        REMOVAL_EPOCH.elapsed().as_millis() as u64,
+        std::sync::atomic::Ordering::SeqCst,
+    );
+}
+
+/// True if a UL window left the screen less than `window` ago.
+pub fn window_removed_within(window: std::time::Duration) -> bool {
+    let last = LAST_REMOVED_MS.load(std::sync::atomic::Ordering::SeqCst);
+    last != u64::MAX
+        && (REMOVAL_EPOCH.elapsed().as_millis() as u64).saturating_sub(last)
+            < window.as_millis() as u64
+}
+
 /// Remove a visible UL window before capture, including minimize animations.
 /// Already hidden windows stay hidden; minimizing them could show them again.
 pub fn minimize_for_capture(window: &winit::window::Window) -> bool {
