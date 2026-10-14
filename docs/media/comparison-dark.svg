@@ -1,48 +1,99 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="880" height="430" viewBox="0 0 880 430" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
-<title id="t">Snipping Tool UL compared with Windows Snipping Tool</title>
-<desc id="d">Start a snip: UL 155 ms, Windows 355 ms; Image on clipboard: UL 50 ms, Windows 76 ms; Open the app: UL 47 ms, Windows 235 ms; Memory while snipping: UL 29 MB, Windows 484 MB; Space on disk: UL 10 MB, Windows 420 MB. Lower is better.</desc>
-<rect x="262" y="18" width="12" height="12" rx="2" fill="#24A3BA"/>
-<text x="280" y="28.5" font-size="14" fill="#E6EDF3" font-weight="600">Snipping Tool UL</text>
-<rect x="422" y="18" width="12" height="12" rx="2" fill="#6A727C"/>
-<text x="440" y="28.5" font-size="14" fill="#E6EDF3">Windows Snipping Tool</text>
-<text x="872" y="28.5" font-size="13" fill="#9198A1" text-anchor="end">Lower is better</text>
-<text x="0" y="78" font-size="15" font-weight="600" fill="#E6EDF3">Start a snip</text>
-<text x="0" y="98" font-size="12.5" fill="#9198A1">hotkey to selection screen</text>
-<path d="M262,64 h179.4 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-179.4 z" fill="#24A3BA"/>
-<text x="453.4" y="76.5" font-size="13" font-weight="600" fill="#E6EDF3">155 ms</text>
-<path d="M262,82 h416.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-416.0 z" fill="#6A727C"/>
-<text x="690.0" y="94.5" font-size="13" font-weight="400" fill="#9198A1">355 ms</text>
-<text x="872" y="86" font-size="15" font-weight="700" fill="#E6EDF3" text-anchor="end">2.3× faster</text>
-<line x1="0" x2="880" y1="122" y2="122" stroke="#3D444D" stroke-width="1"/>
-<text x="0" y="148" font-size="15" font-weight="600" fill="#E6EDF3">Image on clipboard</text>
-<text x="0" y="168" font-size="12.5" fill="#9198A1">after you let go of the mouse</text>
-<path d="M262,134 h272.3 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-272.3 z" fill="#24A3BA"/>
-<text x="546.3" y="146.5" font-size="13" font-weight="600" fill="#E6EDF3">50 ms</text>
-<path d="M262,152 h416.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-416.0 z" fill="#6A727C"/>
-<text x="690.0" y="164.5" font-size="13" font-weight="400" fill="#9198A1">76 ms</text>
-<text x="872" y="156" font-size="15" font-weight="700" fill="#E6EDF3" text-anchor="end">1.5× faster</text>
-<line x1="0" x2="880" y1="192" y2="192" stroke="#3D444D" stroke-width="1"/>
-<text x="0" y="218" font-size="15" font-weight="600" fill="#E6EDF3">Open the app</text>
-<text x="0" y="238" font-size="12.5" fill="#9198A1">launch to window</text>
-<path d="M262,204 h80.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-80.0 z" fill="#24A3BA"/>
-<text x="354.0" y="216.5" font-size="13" font-weight="600" fill="#E6EDF3">47 ms</text>
-<path d="M262,222 h416.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-416.0 z" fill="#6A727C"/>
-<text x="690.0" y="234.5" font-size="13" font-weight="400" fill="#9198A1">235 ms</text>
-<text x="872" y="226" font-size="15" font-weight="700" fill="#E6EDF3" text-anchor="end">5.0× faster</text>
-<line x1="0" x2="880" y1="262" y2="262" stroke="#3D444D" stroke-width="1"/>
-<text x="0" y="288" font-size="15" font-weight="600" fill="#E6EDF3">Memory while snipping</text>
-<text x="0" y="308" font-size="12.5" fill="#9198A1">RAM in use during a capture</text>
-<path d="M262,274 h21.2 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-21.2 z" fill="#24A3BA"/>
-<text x="295.2" y="286.5" font-size="13" font-weight="600" fill="#E6EDF3">29 MB</text>
-<path d="M262,292 h416.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-416.0 z" fill="#6A727C"/>
-<text x="690.0" y="304.5" font-size="13" font-weight="400" fill="#9198A1">484 MB</text>
-<text x="872" y="296" font-size="15" font-weight="700" fill="#E6EDF3" text-anchor="end">17× less</text>
-<line x1="0" x2="880" y1="332" y2="332" stroke="#3D444D" stroke-width="1"/>
-<text x="0" y="358" font-size="15" font-weight="600" fill="#E6EDF3">Space on disk</text>
-<text x="0" y="378" font-size="12.5" fill="#9198A1">installed size</text>
-<path d="M262,344 h6.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-6.0 z" fill="#24A3BA"/>
-<text x="280.0" y="356.5" font-size="13" font-weight="600" fill="#E6EDF3">10 MB</text>
-<path d="M262,362 h416.0 a4,4 0 0 1 4,4 v8 a4,4 0 0 1 -4,4 h-416.0 z" fill="#6A727C"/>
-<text x="690.0" y="374.5" font-size="13" font-weight="400" fill="#9198A1">420 MB</text>
-<text x="872" y="366" font-size="15" font-weight="700" fill="#E6EDF3" text-anchor="end">42× smaller</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="594" viewBox="0 0 880 594" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+<title id="t">Snipping Tool UL compared with Windows Snipping Tool, ShareX, Greenshot and Flameshot</title>
+<desc id="d">Start a snip: Snipping Tool UL 170 ms, Windows Snipping Tool 363 ms, ShareX 249 ms, Greenshot 265 ms, Flameshot not measured; Image on clipboard: Snipping Tool UL 50 ms, Windows Snipping Tool 91 ms, ShareX 144 ms, Greenshot 63 ms, Flameshot not measured; Memory while snipping: Snipping Tool UL 14 MB, Windows Snipping Tool 474 MB, ShareX 922 MB, Greenshot 133 MB, Flameshot not measured; Memory in the background: Snipping Tool UL 2.0 MB, Windows Snipping Tool 0 MB, ShareX 107 MB, Greenshot 45 MB, Flameshot 8.3 MB; Space on disk: Snipping Tool UL 9.6 MB, Windows Snipping Tool 420 MB, ShareX 517 MB, Greenshot 9.0 MB, Flameshot 95 MB. Lower is better.</desc>
+<rect x="232" y="16" width="12" height="12" rx="2" fill="#24A3BA"/>
+<text x="250" y="26.5" font-size="14" font-weight="600" fill="#E6EDF3">Snipping Tool UL</text>
+<rect x="392" y="16" width="12" height="12" rx="2" fill="#6A727C"/>
+<text x="410" y="26.5" font-size="14" fill="#E6EDF3">Other snipping tools</text>
+<text x="872" y="26.5" font-size="13" fill="#9198A1" text-anchor="end">Lower is better</text>
+<text x="0" y="73" font-size="15" font-weight="600" fill="#E6EDF3">Start a snip</text>
+<text x="0" y="92" font-size="12.5" fill="#9198A1">hotkey to selection screen</text>
+<text x="380" y="70.5" font-size="12.5" font-weight="600" fill="#E6EDF3" text-anchor="end">Snipping Tool UL</text>
+<path d="M390,60 h127.1 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-127.1 z" fill="#24A3BA"/>
+<text x="529.1" y="70.5" font-size="12.5" font-weight="600" fill="#E6EDF3">170 ms</text>
+<text x="380" y="86.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">Windows Snipping Tool</text>
+<path d="M390,76 h276.0 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-276.0 z" fill="#6A727C"/>
+<text x="678.0" y="86.5" font-size="12.5" font-weight="400" fill="#9198A1">363 ms</text>
+<text x="380" y="102.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">ShareX</text>
+<path d="M390,92 h188.1 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-188.1 z" fill="#6A727C"/>
+<text x="590.1" y="102.5" font-size="12.5" font-weight="400" fill="#9198A1">249 ms</text>
+<text x="380" y="118.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">Greenshot</text>
+<path d="M390,108 h200.4 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-200.4 z" fill="#6A727C"/>
+<text x="602.4" y="118.5" font-size="12.5" font-weight="400" fill="#9198A1">265 ms</text>
+<text x="380" y="134.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">Flameshot</text>
+<text x="390" y="134.5" font-size="12.5" font-style="italic" fill="#9198A1">not measured</text>
+<text x="872" y="82" font-size="15" font-weight="700" fill="#E6EDF3" text-anchor="end">UL: fastest</text>
+<line x1="0" x2="880" y1="152" y2="152" stroke="#3D444D" stroke-width="1"/>
+<text x="0" y="179" font-size="15" font-weight="600" fill="#E6EDF3">Image on clipboard</text>
+<text x="0" y="198" font-size="12.5" fill="#9198A1">after you let go of the mouse</text>
+<text x="380" y="176.5" font-size="12.5" font-weight="600" fill="#E6EDF3" text-anchor="end">Snipping Tool UL</text>
+<path d="M390,166 h93.2 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-93.2 z" fill="#24A3BA"/>
+<text x="495.2" y="176.5" font-size="12.5" font-weight="600" fill="#E6EDF3">50 ms</text>
+<text x="380" y="192.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">Windows Snipping Tool</text>
+<path d="M390,182 h172.9 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-172.9 z" fill="#6A727C"/>
+<text x="574.9" y="192.5" font-size="12.5" font-weight="400" fill="#9198A1">91 ms</text>
+<text x="380" y="208.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">ShareX</text>
+<path d="M390,198 h276.0 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-276.0 z" fill="#6A727C"/>
+<text x="678.0" y="208.5" font-size="12.5" font-weight="400" fill="#9198A1">144 ms</text>
+<text x="380" y="224.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">Greenshot</text>
+<path d="M390,214 h118.5 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-118.5 z" fill="#6A727C"/>
+<text x="520.5" y="224.5" font-size="12.5" font-weight="400" fill="#9198A1">63 ms</text>
+<text x="380" y="240.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">Flameshot</text>
+<text x="390" y="240.5" font-size="12.5" font-style="italic" fill="#9198A1">not measured</text>
+<text x="872" y="188" font-size="15" font-weight="700" fill="#E6EDF3" text-anchor="end">UL: fastest</text>
+<line x1="0" x2="880" y1="258" y2="258" stroke="#3D444D" stroke-width="1"/>
+<text x="0" y="285" font-size="15" font-weight="600" fill="#E6EDF3">Memory while snipping</text>
+<text x="0" y="304" font-size="12.5" fill="#9198A1">RAM in use during a capture</text>
+<text x="380" y="282.5" font-size="12.5" font-weight="600" fill="#E6EDF3" text-anchor="end">Snipping Tool UL</text>
+<rect x="390" y="272" width="4.3" height="12" fill="#24A3BA"/>
+<text x="402.3" y="282.5" font-size="12.5" font-weight="600" fill="#E6EDF3">14 MB</text>
+<text x="380" y="298.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">Windows Snipping Tool</text>
+<path d="M390,288 h139.9 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-139.9 z" fill="#6A727C"/>
+<text x="541.9" y="298.5" font-size="12.5" font-weight="400" fill="#9198A1">474 MB</text>
+<text x="380" y="314.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">ShareX</text>
+<path d="M390,304 h276.0 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-276.0 z" fill="#6A727C"/>
+<text x="678.0" y="314.5" font-size="12.5" font-weight="400" fill="#9198A1">922 MB</text>
+<text x="380" y="330.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">Greenshot</text>
+<path d="M390,320 h36.4 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-36.4 z" fill="#6A727C"/>
+<text x="438.4" y="330.5" font-size="12.5" font-weight="400" fill="#9198A1">133 MB</text>
+<text x="380" y="346.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">Flameshot</text>
+<text x="390" y="346.5" font-size="12.5" font-style="italic" fill="#9198A1">not measured</text>
+<text x="872" y="294" font-size="15" font-weight="700" fill="#E6EDF3" text-anchor="end">UL: least</text>
+<line x1="0" x2="880" y1="364" y2="364" stroke="#3D444D" stroke-width="1"/>
+<text x="0" y="391" font-size="15" font-weight="600" fill="#E6EDF3">Memory in the background</text>
+<text x="0" y="410" font-size="12.5" fill="#9198A1">waiting in the tray</text>
+<text x="380" y="388.5" font-size="12.5" font-weight="600" fill="#E6EDF3" text-anchor="end">Snipping Tool UL</text>
+<rect x="390" y="378" width="5.2" height="12" fill="#24A3BA"/>
+<text x="403.2" y="388.5" font-size="12.5" font-weight="600" fill="#E6EDF3">2.0 MB</text>
+<text x="380" y="404.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">Windows Snipping Tool</text>
+<text x="390" y="404.5" font-size="12.5" font-style="italic" fill="#9198A1">0 MB, not running</text>
+<text x="380" y="420.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">ShareX</text>
+<path d="M390,410 h276.0 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-276.0 z" fill="#6A727C"/>
+<text x="678.0" y="420.5" font-size="12.5" font-weight="400" fill="#9198A1">107 MB</text>
+<text x="380" y="436.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">Greenshot</text>
+<path d="M390,426 h113.8 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-113.8 z" fill="#6A727C"/>
+<text x="515.8" y="436.5" font-size="12.5" font-weight="400" fill="#9198A1">45 MB</text>
+<text x="380" y="452.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">Flameshot</text>
+<path d="M390,442 h17.7 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-17.7 z" fill="#6A727C"/>
+<text x="419.7" y="452.5" font-size="12.5" font-weight="400" fill="#9198A1">8.3 MB</text>
+<text x="872" y="400" font-size="15" font-weight="700" fill="#E6EDF3" text-anchor="end">UL: 2nd least</text>
+<line x1="0" x2="880" y1="470" y2="470" stroke="#3D444D" stroke-width="1"/>
+<text x="0" y="497" font-size="15" font-weight="600" fill="#E6EDF3">Space on disk</text>
+<text x="0" y="516" font-size="12.5" fill="#9198A1">unpacked or installed size</text>
+<text x="380" y="494.5" font-size="12.5" font-weight="600" fill="#E6EDF3" text-anchor="end">Snipping Tool UL</text>
+<rect x="390" y="484" width="5.2" height="12" fill="#24A3BA"/>
+<text x="403.2" y="494.5" font-size="12.5" font-weight="600" fill="#E6EDF3">9.6 MB</text>
+<text x="380" y="510.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">Windows Snipping Tool</text>
+<path d="M390,500 h223.5 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-223.5 z" fill="#6A727C"/>
+<text x="625.5" y="510.5" font-size="12.5" font-weight="400" fill="#9198A1">420 MB</text>
+<text x="380" y="526.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">ShareX</text>
+<path d="M390,516 h276.0 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-276.0 z" fill="#6A727C"/>
+<text x="678.0" y="526.5" font-size="12.5" font-weight="400" fill="#9198A1">517 MB</text>
+<text x="380" y="542.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">Greenshot</text>
+<rect x="390" y="532" width="4.9" height="12" fill="#6A727C"/>
+<text x="402.9" y="542.5" font-size="12.5" font-weight="400" fill="#9198A1">9.0 MB</text>
+<text x="380" y="558.5" font-size="12.5" font-weight="400" fill="#9198A1" text-anchor="end">Flameshot</text>
+<path d="M390,548 h47.5 a4,4 0 0 1 4,4 v4 a4,4 0 0 1 -4,4 h-47.5 z" fill="#6A727C"/>
+<text x="449.5" y="558.5" font-size="12.5" font-weight="400" fill="#9198A1">95 MB</text>
+<text x="872" y="506" font-size="15" font-weight="700" fill="#E6EDF3" text-anchor="end">UL: 2nd smallest</text>
 </svg>

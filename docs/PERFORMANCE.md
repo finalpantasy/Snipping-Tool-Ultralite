@@ -1,6 +1,6 @@
 # Snipping Tool UL performance
 
-Component measurements from October 12-13, 2026, and a capture, startup and memory comparison with Microsoft's Snipping Tool from October 14, 2026.
+Component measurements from October 12-13, 2026, and capture, startup and memory comparisons with Microsoft's Snipping Tool, ShareX, Greenshot and Flameshot from October 14, 2026.
 
 [Download and overview](../README.md) | [Release verification](VERIFICATION-0.3.25.md)
 
@@ -79,6 +79,51 @@ Separate generated-image GDI tests measured frozen-image drawing at 0.148 ms for
 Two 1,000-call dense 4K OCR traces completed successfully. After warm-up, requested live Rust storage stayed at 33,191,186 bytes in 10 blocks, including the constant 31.64 MiB authored source. Handles stayed at 131; threads varied between two and five without accumulating. In the final trace, private process memory still ranged from 37,621,760 to 47,456,256 bytes.
 
 Earlier conservative memory-variation guards failed and remain recorded. Longer traces distinguished stable live allocations from fluctuating committed/cache pages; they did not certify a leak-free full GUI application. Diagnostic heap-cache trimming was not added to production. Cancellation, timeout-stop and shutdown fixtures released their owned jobs and temporary files. See the [full investigation](LEAK-INVESTIGATION-2026-10-13.md).
+
+## Comparison with ShareX, Greenshot and Flameshot
+
+Measured October 14, 2026 on the same PC and harness as the Microsoft comparison below: UL 0.3.25, Microsoft Snipping Tool 11.2608.41.0, ShareX 21.0.0, Greenshot 1.3.323 and Flameshot 14.0.0, all official portable builds with verified download digests. Background load from other applications was present (CPU 44 to 74% before the run) and affected all apps equally; absolute times are a little higher than in the quiet October 14 Microsoft-only run.
+
+**Settings.** Every app copied each snip to the clipboard and saved it to disk: Microsoft's default auto-save, UL with History on, ShareX's defaults (copy and save; no upload), Greenshot with its destination picker replaced by clipboard plus file. Hotkeys: Win+Shift+S (Microsoft), Ctrl+Shift+S (UL), Ctrl+Shift+F10 (ShareX; its default Ctrl+Print Screen was taken on this PC), Ctrl+Shift+F9 (Greenshot; its default Print Screen is Windows' own key).
+
+**Method.** Five warm-up rounds, then 30 measured rounds. The app order rotated each round so no app ran twice in a row. Each trial waited 800 ms after the selection screen appeared before dragging, so every app was ready for input; the timings below do not include that wait.
+
+### Region capture
+
+| Median (p95) | UL | Microsoft | ShareX | Greenshot |
+| --- | ---: | ---: | ---: | ---: |
+| Hotkey to selection window visible | 170 ms (174) | 363 ms (434) | 249 ms (284) | 265 ms (283) |
+| Release to bitmap readable from the clipboard | 50 ms (74) | 91 ms (616) | 144 ms (161) | 63 ms (65) |
+| Release to editor window visible | 94 ms (111) | none | none | none |
+| Private bytes of the app when the bitmap was readable | 14 MB (29) | 474 MB (475) | 922 MB (1,676) | 133 MB (137) |
+| Peak working set of the app | 288 MB | 498 MB | 2,522 MB | 506 MB |
+| Correct size and pixels | 30 of 30 | 30 of 30 | 29 of 30 | 28 of 30 |
+
+ShareX's private memory rose by about 105 MB with every snip and only fell back when .NET garbage collection ran, after reaching roughly 1.1 to 1.9 GB, so its value depends on how many snips came before. The three wrong snips (one ShareX, two Greenshot) all came out 1175 x 661, consistent with the selection starting at the first mouse-move point instead of the press point. In an earlier attempt that let the same app snip twice within about 3 seconds, Greenshot missed the press in every second snip; rotating the order removed that pattern.
+
+**Flameshot** was not measured for capture. On a PC with several monitors it opens a monitor picker before every snip, even with its `captureActiveMonitor` setting on, and its only Windows hotkey is Print Screen, which Windows keeps for its own tool by default.
+
+### Background cost while waiting in the tray
+
+Each app started fresh on a private, never-displayed desktop; 10 measured launches after 2 warm-ups, plus 3 ten-second idle samples.
+
+| Median | UL | ShareX | Greenshot | Flameshot |
+| --- | ---: | ---: | ---: | ---: |
+| Start to CPU quiet (1 s with no work) | 78 ms | 1,328 ms | 327 ms | 202 ms |
+| CPU time used starting | 16 ms | 922 ms | 313 ms | 94 ms |
+| Private bytes, idle in the tray | 2.0 MB | 107 MB | 45 MB | 8.3 MB |
+| CPU over 10 s idle | none measurable | 0 to 47 ms | none measurable | none measurable |
+
+Microsoft's Snipping Tool keeps no process running between snips, so its background cost is zero.
+
+### Size
+
+| | UL | Microsoft | ShareX | Greenshot | Flameshot |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Download | 4.9 MB | Store package | 199 MB | 3.5 MB | 53 MB |
+| On disk | 9.6 MB | about 420 MB | 517 MB | 9.0 MB | 95 MB |
+
+Greenshot is the smallest on disk because it relies on the .NET Framework that ships with Windows. ShareX's folder includes ffmpeg (193 MB) for screen recording.
 
 ## Microsoft stock Snipping Tool comparison
 

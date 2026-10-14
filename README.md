@@ -23,22 +23,22 @@
 
 ## Why use it
 
-- **It's quick.** Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> and the selection screen is up in about 0.15 seconds, more than twice as fast as the Snipping Tool built into Windows.
+- **It's quick.** Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> and the selection screen is up in about 0.17 seconds. In our tests it was faster than the Snipping Tool built into Windows, ShareX and Greenshot.
 - **Your snip is ready the moment you let go.** It's already on your clipboard, so you can paste it anywhere, and the editor opens by itself in case you want to draw on it.
 - **It's tiny.** One 10 MB file. No installer, no account, no ads.
-- **It stays out of your way.** When you're not snipping it uses no measurable CPU. While snipping it uses about 30 MB of memory; Windows' own tool uses close to 500 MB.
+- **It stays out of your way.** When you're not snipping it uses no measurable CPU. While snipping it uses about 15 MB of memory; Windows' own tool uses close to 500 MB and ShareX close to 1 GB.
 - **Your screenshots stay on your PC.** A snip only leaves your computer when you press Upload.
 
 ## How it compares
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/media/comparison-dark.svg">
-  <img src="docs/media/comparison-light.svg" alt="Snipping Tool UL vs Windows Snipping Tool: start a snip 155 ms vs 355 ms, image on clipboard 50 ms vs 76 ms, open the app 47 ms vs 235 ms, memory while snipping 29 MB vs 484 MB, space on disk 10 MB vs 420 MB">
+  <img src="docs/media/comparison-light.svg" alt="Snipping Tool UL compared with Windows Snipping Tool, ShareX, Greenshot and Flameshot. Start a snip: UL 170 ms, Windows 363, ShareX 249, Greenshot 265. Image on clipboard: UL 50 ms, Windows 91, ShareX 144, Greenshot 63. Memory while snipping: UL 14 MB, Windows 474, ShareX 922, Greenshot 133. Memory in the background: UL 2 MB, Windows 0 (not running), ShareX 107, Greenshot 45, Flameshot 8. Space on disk: UL 9.6 MB, Windows 420, ShareX 517, Greenshot 9.0, Flameshot 95.">
 </picture>
 
-<sub>Snipping Tool UL 0.3.22 vs Windows Snipping Tool 11.2608.41.0 on the same Windows 11 PC, October 14, 2026. 30 runs of each, typical (median) result shown. Every test snip was checked pixel by pixel. <a href="docs/PERFORMANCE.md">How we measured</a></sub>
+<sub>Snipping Tool UL 0.3.25, Windows Snipping Tool 11.2608.41.0, ShareX 21.0.0, Greenshot 1.3.323 and Flameshot 14.0.0 on the same Windows 11 PC with three 4K monitors, October 14, 2026. 30 test snips per app, typical (median) result shown, every snip checked pixel by pixel. <a href="docs/PERFORMANCE.md">How we measured</a></sub>
 
-ShareX, Greenshot and Flameshot are being measured the same way next.
+Flameshot asks which monitor to use before every snip on a PC with more than one screen, so its snip speed could not be measured the same way.
 
 ## What it can do
 
