@@ -3152,7 +3152,7 @@ dependencies = [
 
 [[package]]
 name = "snipping-tool-ul"
-version = "0.3.22"
+version = "0.3.23"
 dependencies = [
  "arboard",
  "base64",

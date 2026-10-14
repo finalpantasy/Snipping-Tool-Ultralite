@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.23 preview
 
 - Fixed an older instance, still running after an upgrade, reclaiming Start on login when Settings were saved. Startup now keeps a registration that points at a newer installed version.
 - Fixed region snips growing past the drawn area when the mouse kept moving after release. The picker now uses each mouse message's own position instead of the live cursor; in a release-then-flick test, captures went from 1 of 10 correct to 15 of 15.

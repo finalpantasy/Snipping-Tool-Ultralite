@@ -2,7 +2,7 @@
 
 Component measurements from October 12-13, 2026, and a capture, startup and memory comparison with Microsoft's Snipping Tool from October 14, 2026.
 
-[Download and overview](../README.md) | [Release verification](VERIFICATION-0.3.22.md)
+[Download and overview](../README.md) | [Release verification](VERIFICATION-0.3.23.md)
 
 ## Results at a glance
 

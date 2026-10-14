@@ -3,7 +3,7 @@
 <h1 align="center">Snipping Tool UL</h1>
 <p align="center">A fast, lightweight snipping tool for Windows 11, written in native Rust.</p>
 
-<p align="center"><a href="https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.22-preview/Snipping-Tool-UL-0.3.22-Windows-x64.zip"><strong>Download 0.3.22 preview</strong></a> · <a href="docs/USAGE.md">User guide</a> · <a href="LICENSE">MIT license</a></p>
+<p align="center"><a href="https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.23-preview/Snipping-Tool-UL-0.3.23-Windows-x64.zip"><strong>Download 0.3.23 preview</strong></a> · <a href="docs/USAGE.md">User guide</a> · <a href="LICENSE">MIT license</a></p>
 
 ![Snipping Tool UL editor in light mode](docs/media/editor-light.png)
 
@@ -58,7 +58,7 @@ Uploads go to Catbox, Freeimage.host or Litterbox (temporary), with no account n
 
 ## Install
 
-1. [Download the ZIP](https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.22-preview/Snipping-Tool-UL-0.3.22-Windows-x64.zip) and extract it.
+1. [Download the ZIP](https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.23-preview/Snipping-Tool-UL-0.3.23-Windows-x64.zip) and extract it.
 2. Run `snipping-tool-ul.exe`.
 3. Click **New** or press **Ctrl+Shift+S**.
 
@@ -68,7 +68,7 @@ It runs portable, with no installer. History and auto-save are off until you tur
 
 ## Status
 
-0.3.22 is a preview. 348 automated tests pass. Not yet verified: mixed-scale multi-monitor setups, live uploads, and memory over long sessions. [Changelog](CHANGELOG.md) · [Release checks](docs/VERIFICATION-0.3.22.md)
+0.3.23 is a preview. 358 automated tests pass. Not yet verified: mixed-scale multi-monitor setups, live uploads, and memory over long sessions. [Changelog](CHANGELOG.md) · [Release checks](docs/VERIFICATION-0.3.23.md)
 
 ## Build
 
