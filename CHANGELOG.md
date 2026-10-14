@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fixed an older instance, still running after an upgrade, reclaiming Start on login when Settings were saved. Startup now keeps a registration that points at a newer installed version.
+
 ## 0.3.22 preview
 
 - The canvas grows with annotations beyond the image and shrinks when they are moved, resized or deleted. Undo and redo restore the matching canvas; original image pixels stay intact.
