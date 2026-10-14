@@ -160,9 +160,22 @@ impl Picker {
                 })
             }
         } else {
-            self.start
-                .zip(end)
-                .and_then(|(start, end)| ScreenRect::between(start, end).intersect(self.bounds))
+            self.start.zip(end).and_then(|(start, end)| {
+                let mut rect = ScreenRect::between(start, end);
+                // The cursor cannot pass the last pixel, so reaching it means
+                // "to the edge": include it rather than stop one short.
+                let right = i64::from(self.bounds.x) + i64::from(self.bounds.width) - 1;
+                let bottom = i64::from(self.bounds.y) + i64::from(self.bounds.height) - 1;
+                if rect.width > 0 && rect.height > 0 {
+                    if i64::from(start.0.max(end.0)) == right {
+                        rect.width += 1;
+                    }
+                    if i64::from(start.1.max(end.1)) == bottom {
+                        rect.height += 1;
+                    }
+                }
+                rect.intersect(self.bounds)
+            })
         }
     }
 
@@ -800,6 +813,33 @@ mod tests {
                 rect_tuple(picker.selection_at(Some((0, 10)))),
                 Some((0, 10, 20, 20))
             );
+        }
+    }
+
+    #[test]
+    fn drag_to_the_last_screen_pixel_reaches_the_edge() {
+        // The cursor stops on the last pixel, so an exclusive end could
+        // never include the rightmost column or bottom row.
+        let mut picker = area_picker();
+        unsafe {
+            assert_eq!(
+                rect_tuple(picker.selection_at(Some((199, 149)))),
+                Some((20, 30, 180, 120))
+            );
+            picker.start = Some((199, 149));
+            assert_eq!(
+                rect_tuple(picker.selection_at(Some((20, 30)))),
+                Some((20, 30, 180, 120))
+            );
+            // Edge to edge selects the whole desktop.
+            picker.start = Some((-100, -50));
+            assert_eq!(
+                rect_tuple(picker.selection_at(Some((199, 149)))),
+                Some((-100, -50, 300, 200))
+            );
+            // A click on the edge is still a click, not a selection.
+            picker.start = Some((199, 149));
+            assert!(picker.selection_at(Some((199, 149))).is_none());
         }
     }
 

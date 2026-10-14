@@ -218,18 +218,26 @@ impl Canvas<'_> {
         );
     }
     pub fn centered(&mut self, x: f32, y: f32, text: &str, size: f32, rgb: (u8, u8, u8)) {
-        let width = measure(text, size * self.scale) / self.scale;
-        self.label(x - width / 2., y, text, size, rgb);
+        // Centre the ink, not the advance box with its side bearings.
+        let (x0, _, x1, _) = text_bounds(text, size * self.scale);
+        self.label(x - (x0 + x1) / 2. / self.scale, y, text, size, rgb);
     }
     pub fn centered_in(&mut self, r: Rect, text: &str, size: f32, rgb: (u8, u8, u8)) {
-        let (x0, y0, x1, y1) = text_bounds(text, size * self.scale);
+        let (x0, _, x1, _) = text_bounds(text, size * self.scale);
+        let top = self.cap_centered_top(r.y + r.h / 2., size);
         self.label(
             r.x + r.w / 2. - (x0 + x1) / 2. / self.scale,
-            r.y + r.h / 2. - (y0 + y1) / 2. / self.scale,
+            top,
             text,
             size,
             rgb,
         );
+    }
+    /// Top of a text line whose capital letters are centred on `middle`.
+    /// Centring on caps rather than each label's own ink keeps labels with
+    /// and without descenders on one baseline, snapped to a physical row.
+    pub fn cap_centered_top(&self, middle: f32, size: f32) -> f32 {
+        cap_centered_top(middle, size, self.scale)
     }
     pub fn icon(&mut self, name: &str, x: f32, y: f32, size: f32, rgb: (u8, u8, u8)) {
         let color = format!("#{:02x}{:02x}{:02x}", rgb.0, rgb.1, rgb.2);
@@ -277,20 +285,38 @@ impl Canvas<'_> {
         } else {
             ink()
         };
+        self.button_content(r, label, icon, false, color);
+    }
+    /// A secondary button whose content ends in a dropdown chevron.
+    pub fn dropdown(&mut self, r: Rect, label: &str, icon: &str, hover: bool) {
+        self.round(r, 7., crate::theme::bg_3(), if hover { 0.9 } else { 0.65 });
+        self.button_content(r, label, Some(icon), true, ink());
+    }
+    /// Centres icon, label and optional chevron as one block. The label's caps
+    /// sit on the button's middle so neighbouring buttons share a baseline.
+    fn button_content(
+        &mut self,
+        r: Rect,
+        label: &str,
+        icon: Option<&str>,
+        chevron: bool,
+        color: (u8, u8, u8),
+    ) {
+        let (x0, _, x1, _) = text_bounds(label, 13. * self.scale);
+        let lead = if icon.is_some() { 24. } else { 0. };
+        // The chevron glyph's ink spans 8..16 of its 24-unit box.
+        let tail = if chevron { 6. + 14. * 8. / 24. } else { 0. };
+        let text_w = (x1 - x0) / self.scale;
+        let left = r.x + (r.w - lead - text_w - tail) / 2.;
+        let middle = r.y + r.h / 2.;
         if let Some(icon) = icon {
-            let (x0, y0, x1, y1) = text_bounds(label, 13. * self.scale);
-            let width = 24. + (x1 - x0) / self.scale;
-            let left = r.x + (r.w - width) / 2.;
-            self.icon(icon, left, r.y + r.h / 2. - 8., 16., color);
-            self.label(
-                left + 24. - x0 / self.scale,
-                r.y + r.h / 2. - (y0 + y1) / 2. / self.scale,
-                label,
-                13.,
-                color,
-            );
-        } else {
-            self.centered_in(r, label, 13., color);
+            self.icon(icon, left, middle - 8., 16., color);
+        }
+        let top = self.cap_centered_top(middle, 13.);
+        self.label(left + lead - x0 / self.scale, top, label, 13., color);
+        if chevron {
+            let x = left + lead + text_w + 6. - 14. * 8. / 24.;
+            self.icon("down", x, middle - 7., 14., muted());
         }
     }
     /// Event-driven help for pointer hover and keyboard focus, bounded to the viewport.
@@ -306,6 +332,16 @@ impl Canvas<'_> {
         self.round(Rect::new(x, y, width, 26.), 6., (54, 51, 62), 1.);
         self.label(x + 10., y + 5., text, 11., INK);
     }
+}
+/// Logical top of a line of `size` text whose capitals are centred on the
+/// logical `middle`, with the baseline snapped to a physical pixel row.
+pub fn cap_centered_top(middle: f32, size: f32, scale: f32) -> f32 {
+    let px = size * scale;
+    let font = crate::font::FONT.for_text("H");
+    let ascent = font.horizontal_line_metrics(px).map_or(px, |m| m.ascent);
+    let cap = font.metrics('H', px);
+    let baseline = (middle * scale + cap.ymin as f32 + cap.height as f32 / 2.).round();
+    (baseline - ascent) / scale
 }
 pub fn measure(text: &str, size: f32) -> f32 {
     let font = crate::font::FONT.for_text(text);

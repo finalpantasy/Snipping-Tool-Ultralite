@@ -42,3 +42,32 @@ fn parse_rejects_garbage() {
     assert!(parse_binding("Ctrl+Banana").is_err());
     assert!(parse_binding("Ctrl+!").is_err());
 }
+
+#[test]
+fn recorder_uses_physical_keys_so_shifted_digits_and_azerty_work() {
+    use snipping_tool_ul::hotkey::binding_from_key;
+    use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
+    let ctrl_shift = ModifiersState::CONTROL | ModifiersState::SHIFT;
+    // Shift+1 types "!" on US layouts and AZERTY's top row types symbols.
+    assert_eq!(
+        binding_from_key(ctrl_shift, &PhysicalKey::Code(KeyCode::Digit1)).as_deref(),
+        Some("Ctrl+Shift+1")
+    );
+    assert_eq!(
+        binding_from_key(ctrl_shift, &PhysicalKey::Code(KeyCode::KeyS)).as_deref(),
+        Some("Ctrl+Shift+S")
+    );
+    assert_eq!(
+        binding_from_key(ModifiersState::ALT, &PhysicalKey::Code(KeyCode::F7)).as_deref(),
+        Some("Alt+F7")
+    );
+    // A strong modifier is still required, and other keys are refused.
+    assert_eq!(
+        binding_from_key(ModifiersState::SHIFT, &PhysicalKey::Code(KeyCode::KeyS)),
+        None
+    );
+    assert_eq!(
+        binding_from_key(ctrl_shift, &PhysicalKey::Code(KeyCode::Space)),
+        None
+    );
+}

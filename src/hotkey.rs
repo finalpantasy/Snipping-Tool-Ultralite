@@ -1,6 +1,56 @@
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use global_hotkey::GlobalHotKeyManager;
 
+/// Builds a binding from a key press in the Settings recorder, or `None`
+/// for keys that cannot be a global hotkey or when no Ctrl/Alt/Super
+/// modifier is held. It reads the physical key, as the global hotkey does:
+/// the typed character changes with Shift and layout, so Ctrl+Shift+1
+/// arrives as "!" and AZERTY's unshifted top row has no digits.
+pub fn binding_from_key(
+    mods: winit::keyboard::ModifiersState,
+    key: &winit::keyboard::PhysicalKey,
+) -> Option<String> {
+    use winit::keyboard::{KeyCode, PhysicalKey};
+    let PhysicalKey::Code(code) = key else {
+        return None;
+    };
+    let name = format!("{code:?}");
+    let key_part = if let Some(c) = name.strip_prefix("Key").filter(|c| c.len() == 1) {
+        c.to_string()
+    } else if let Some(d) = name.strip_prefix("Digit").filter(|d| d.len() == 1) {
+        d.to_string()
+    } else if *code == KeyCode::PrintScreen
+        || name
+            .strip_prefix('F')
+            .and_then(|n| n.parse::<u8>().ok())
+            .is_some_and(|n| (1..=12).contains(&n))
+    {
+        name
+    } else {
+        return None;
+    };
+    // Require a strong modifier so the hotkey can't swallow normal typing.
+    if !(mods.control_key() || mods.alt_key() || mods.super_key()) {
+        return None;
+    }
+    let mut parts: Vec<String> = Vec::new();
+    for (held, label) in [
+        (mods.control_key(), "Ctrl"),
+        (mods.shift_key(), "Shift"),
+        (mods.alt_key(), "Alt"),
+        (mods.super_key(), "Super"),
+    ] {
+        if held {
+            parts.push(label.into());
+        }
+    }
+    parts.push(key_part);
+    let binding = parts.join("+");
+    // Final validation through the real parser.
+    parse_binding(&binding).ok()?;
+    Some(binding)
+}
+
 /// Parse a binding string like "Ctrl+Shift+S" into modifiers and a key code.
 ///
 /// Supported keys: letters, digits, F1-F12, and PrintScreen.

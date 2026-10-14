@@ -25,6 +25,8 @@ const THUMB_H: u32 = 80;
 const PADDING: f32 = 16.0;
 const GAP: f32 = 12.0;
 const HEADER_H: f32 = 44.0;
+/// Side margin that centres the thumbnail grid; the header shares its edges.
+const MARGIN: f32 = (WIN_W as f32 - (COLS as f32 * THUMB_W as f32 + (COLS - 1) as f32 * GAP)) / 2.;
 
 /// Disconnect before waking the UI, including cancelled or panicking loaders.
 struct LoadCompletion {
@@ -251,10 +253,20 @@ impl HistoryWindow {
                         if !crate::clipboard_queue::is_current(ticket) {
                             return;
                         }
+                        // The log is invisible in the windowed build, so say why
+                        // nothing was copied instead of failing silently.
+                        let failed = |error: &str| {
+                            tracing::error!("Failed to copy history image: {error}");
+                            let _ = notify_rust::Notification::new()
+                                .summary("Snipping Tool UL")
+                                .body(&format!("Could not copy this capture: {error}"))
+                                .timeout(4000)
+                                .show();
+                        };
                         let rgba = match crate::history_copy::decode(&path) {
                             Ok(image) => image,
                             Err(error) => {
-                                tracing::error!("Failed to copy history image: {error}");
+                                failed(&error.to_string());
                                 return;
                             }
                         };
@@ -272,9 +284,7 @@ impl HistoryWindow {
                                     .show();
                             }
                             Ok(false) => {} // A newer request superseded this copy.
-                            Err(e) => {
-                                tracing::error!("Failed to copy history image: {e}");
-                            }
+                            Err(e) => failed(&e.to_string()),
                         }
                     });
                 }
@@ -294,7 +304,7 @@ impl Drop for HistoryWindow {
 // ── Drawing helpers ──
 
 fn clear_rect() -> (f32, f32, f32, f32) {
-    (WIN_W as f32 - PADDING - 80., 10., 80., 24.)
+    (WIN_W as f32 - MARGIN - 80., 10., 80., 24.)
 }
 fn content_height(count: usize) -> f32 {
     if count == 0 {
@@ -307,7 +317,7 @@ fn max_scroll(count: usize) -> f32 {
     (content_height(count) - (WIN_H as f32 - HEADER_H)).max(0.)
 }
 fn thumb_rect(thumbnails: &[Thumbnail], idx: usize, scroll: f32) -> (f32, f32, f32, f32) {
-    let x = PADDING + (idx % COLS) as f32 * (THUMB_W as f32 + GAP);
+    let x = MARGIN + (idx % COLS) as f32 * (THUMB_W as f32 + GAP);
     let y = HEADER_H + PADDING + (idx / COLS) as f32 * (THUMB_H as f32 + GAP) - scroll;
     if let Some(t) = thumbnails.get(idx) {
         (x, y, t.width as f32 / t.scale, t.height as f32 / t.scale)
@@ -367,23 +377,16 @@ fn draw_history(
         } else {
             empty_message(history_enabled)
         };
+        draw_label(pixmap, MARGIN, 88., title, 18., crate::theme::text_normal());
         draw_label(
             pixmap,
-            PADDING,
-            88.,
-            title,
-            18.,
-            crate::theme::text_normal(),
-        );
-        draw_label(
-            pixmap,
-            PADDING,
+            MARGIN,
             126.,
             detail,
             13.,
             crate::theme::text_muted(),
         );
-        draw_label(pixmap, PADDING, 154., note, 13., crate::theme::text_muted());
+        draw_label(pixmap, MARGIN, 154., note, 13., crate::theme::text_muted());
     } else {
         for (i, thumb) in thumbnails.iter().enumerate() {
             let (x, y, tw, th) = thumb_rect(thumbnails, i, scroll_offset);
@@ -442,8 +445,8 @@ fn draw_history(
     );
     draw_label(
         pixmap,
-        PADDING,
-        14.0,
+        MARGIN,
+        crate::ui::cap_centered_top(22., 16., scale),
         "Recent captures",
         16.0,
         crate::theme::text_normal(),
@@ -451,9 +454,9 @@ fn draw_history(
     // Separator
     fill_rect_rgb(
         pixmap,
-        PADDING,
+        MARGIN,
         HEADER_H - 4.0,
-        WIN_W as f32 - PADDING * 2.0,
+        WIN_W as f32 - MARGIN * 2.0,
         1.0,
         crate::theme::bg_3(),
     );
@@ -465,17 +468,16 @@ fn draw_history(
         } else {
             crate::theme::bg_3()
         };
-        fill_rect_rgb(pixmap, cx, cy, cw, ch, bg);
-        let label = "Clear All";
-        let tw = crate::ui::measure(label, 12.0);
-        draw_label(
+        // Rounded like the other buttons, with the label's caps centred.
+        let mut icons = crate::icons::IconCache::new();
+        let mut c = crate::ui::Canvas {
             pixmap,
-            cx + (cw - tw) / 2.0,
-            cy + 5.0,
-            label,
-            12.0,
-            crate::theme::text_normal(),
-        );
+            scale,
+            icons: &mut icons,
+        };
+        let r = crate::ui::Rect::new(cx, cy, cw, ch);
+        c.round(r, 6., bg, 1.);
+        c.centered_in(r, "Clear All", 12.0, crate::theme::text_normal());
     }
 }
 
@@ -566,11 +568,11 @@ mod tests {
     fn native_thumbnails_keep_logical_hit_bounds_across_dpi() {
         for dpi in [1., 1.25, 1.5, 2.] {
             let thumbs = vec![red_thumbnail(dpi)];
-            assert_eq!(thumb_rect(&thumbs, 0, 0.), (16., 60., 120., 80.));
+            assert_eq!(thumb_rect(&thumbs, 0, 0.), (42., 60., 120., 80.));
             let mut p =
                 Pixmap::new((WIN_W as f32 * dpi) as u32, (WIN_H as f32 * dpi) as u32).unwrap();
             draw_history(&mut p, &thumbs, 1, Some(0), 0., false, true, false);
-            for (x, y) in [(17., 61.), (135., 139.)] {
+            for (x, y) in [(43., 61.), (161., 139.)] {
                 let i = (((y * dpi) as u32 * p.width() + (x * dpi) as u32) * 4) as usize;
                 assert_eq!(&p.data()[i..i + 4], &[255, 0, 0, 255]);
             }

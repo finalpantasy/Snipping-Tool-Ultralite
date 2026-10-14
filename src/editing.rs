@@ -213,6 +213,28 @@ impl OverlayState {
         self.sync_step_counter();
         true
     }
+    /// Drops the active tool's unfinished stroke before switching tools. The
+    /// mouse-up goes to the new tool, so the old one would stay "drawing" and
+    /// its stale shape would reappear when switched back.
+    pub fn discard_tool_stroke(&mut self) {
+        use tools::AnnotationTool;
+        let tool: &mut dyn AnnotationTool = match self.active_tool {
+            ToolKind::Arrow => &mut self.arrow_tool,
+            ToolKind::Rectangle => &mut self.rectangle_tool,
+            ToolKind::RoundedRect => &mut self.rounded_rect_tool,
+            ToolKind::Circle => &mut self.circle_tool,
+            ToolKind::Line => &mut self.line_tool,
+            ToolKind::Pencil => &mut self.pencil_tool,
+            ToolKind::Highlight => &mut self.highlight_tool,
+            ToolKind::Pixelate => &mut self.pixelate_tool,
+            ToolKind::Spotlight => &mut self.spotlight_tool,
+            ToolKind::Measurement => &mut self.measurement_tool,
+            _ => return,
+        };
+        if tool.is_drawing() {
+            let _ = tool.on_mouse_up(crate::geometry::Point::new(0., 0.));
+        }
+    }
     pub fn in_progress(&self) -> Option<Annotation> {
         use tools::AnnotationTool;
         match self.active_tool {

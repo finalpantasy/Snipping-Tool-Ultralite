@@ -140,11 +140,11 @@ impl Countdown {
         let text_color = crate::theme::gcolor(crate::theme::accent_alt(), 1.0);
         let font_size = 60.0_f32;
 
-        let text_w = crate::tools::measure_text_width(&num_str, font_size);
-        let text_h = crate::tools::measure_text_height(font_size);
+        // Centre the digits' ink; the line box sits about 2 pixels high.
+        let (x0, y0, x1, y1) = crate::tools::text_ink_bounds(&num_str, font_size);
         let text_pos = Point::new(
-            (CD_SIZE as f32 - text_w) / 2.0,
-            (CD_SIZE as f32 - text_h) / 2.0,
+            (CD_SIZE as f32 / 2.0 - (x0 + x1) / 2.0).round(),
+            (CD_SIZE as f32 / 2.0 - (y0 + y1) / 2.0).round(),
         );
 
         crate::tools::render_text_annotation(

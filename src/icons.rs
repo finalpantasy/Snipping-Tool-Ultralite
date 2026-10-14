@@ -32,7 +32,8 @@ fn get_svg(name: &str) -> Option<String> {
         "more" => {
             r#"<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>"#
         }
-        "check" => r#"<path d="m5 12 4 4L19 6"/>"#,
+        "check" => r#"<path d="m5 13 4 4L19 7"/>"#,
+        "close" => r#"<path d="M6 6l12 12M18 6 6 18"/>"#,
         "window" => r#"<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/>"#,
         "screen" => {
             r#"<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M12 17v4M8 21h8"/>"#
@@ -41,8 +42,9 @@ fn get_svg(name: &str) -> Option<String> {
             r#"<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m3 16 5-5 4 4 3-3 6 6"/><circle cx="15" cy="8" r="1"/>"#
         }
         "history" => r#"<path d="M3 11a9 9 0 1 1 2 7M3 4v7h7M12 7v5l3 2"/>"#,
-        "undo" => r#"<path d="M8 4 3 9l5 5M3 9h10a7 7 0 1 1 0 14"/>"#,
-        "redo" => r#"<path d="m16 4 5 5-5 5M21 9H11a7 7 0 1 0 0 14"/>"#,
+        // Bounds 4..20 on both axes keep the arrows centred in their box.
+        "undo" => r#"<path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>"#,
+        "redo" => r#"<path d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>"#,
         "select" => r#"<path d="M4 3v17l5-5 4 6 3-2-4-6h7L4 3Z"/>"#,
         "arrow" => r#"<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>"#,
         "rectangle" => r#"<rect width="18" height="18" x="3" y="3" rx="2"/>"#,

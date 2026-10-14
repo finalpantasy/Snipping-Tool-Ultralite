@@ -273,6 +273,7 @@ impl App {
                 | HomeAction::Undo
                 | HomeAction::Redo
                 | HomeAction::CustomColor
+                | HomeAction::DeleteAnnotation
         ) {
             if let AppState::Capturing(ref mut o) = self.state {
                 o.commit_text();
@@ -489,6 +490,7 @@ impl App {
             match action {
                 ButtonAction::Tool(kind) => {
                     o.finish_annotation_drag();
+                    o.discard_tool_stroke();
                     o.active_tool = kind;
                     if kind != ToolKind::Select {
                         o.selected_index = None;
@@ -1885,65 +1887,6 @@ fn encode_png(pixels: Vec<u8>, w: u32, h: u32) -> Result<Vec<u8>, String> {
     Ok(png_bytes)
 }
 
-/// Build a hotkey binding string (e.g. "Ctrl+Shift+S") from the current
-/// modifier state and a pressed key. Returns None for keys that can't be a
-/// global hotkey or when no Ctrl/Alt/Super modifier is held.
-fn hotkey_binding_from_key(mods: ModifiersState, key: &Key) -> Option<String> {
-    let key_part: String = match key {
-        Key::Character(ch) => {
-            let s = ch.as_str();
-            let c = s.chars().next()?;
-            if s.chars().count() == 1 && (c.is_ascii_alphabetic() || c.is_ascii_digit()) {
-                c.to_ascii_uppercase().to_string()
-            } else {
-                return None;
-            }
-        }
-        Key::Named(named) => match named {
-            NamedKey::F1 => "F1".into(),
-            NamedKey::F2 => "F2".into(),
-            NamedKey::F3 => "F3".into(),
-            NamedKey::F4 => "F4".into(),
-            NamedKey::F5 => "F5".into(),
-            NamedKey::F6 => "F6".into(),
-            NamedKey::F7 => "F7".into(),
-            NamedKey::F8 => "F8".into(),
-            NamedKey::F9 => "F9".into(),
-            NamedKey::F10 => "F10".into(),
-            NamedKey::F11 => "F11".into(),
-            NamedKey::F12 => "F12".into(),
-            NamedKey::PrintScreen => "PrintScreen".into(),
-            _ => return None,
-        },
-        _ => return None,
-    };
-
-    // Require a strong modifier so the hotkey can't swallow normal typing.
-    if !(mods.control_key() || mods.alt_key() || mods.super_key()) {
-        return None;
-    }
-
-    let mut parts: Vec<String> = Vec::new();
-    if mods.control_key() {
-        parts.push("Ctrl".into());
-    }
-    if mods.shift_key() {
-        parts.push("Shift".into());
-    }
-    if mods.alt_key() {
-        parts.push("Alt".into());
-    }
-    if mods.super_key() {
-        parts.push("Super".into());
-    }
-    parts.push(key_part);
-    let binding = parts.join("+");
-
-    // Final validation through the real parser
-    snipping_tool_ul::hotkey::parse_binding(&binding).ok()?;
-    Some(binding)
-}
-
 /// Sends a worker's result exactly once, or a failure if the worker unwinds
 /// before reporting. State flags such as `picker_active` and
 /// `save_dialog_pending` are only cleared by these events.
@@ -2676,9 +2619,9 @@ impl ApplicationHandler<UserEvent> for App {
                                     sw.window.request_redraw();
                                     return;
                                 }
-                                if let Some(binding) = hotkey_binding_from_key(
+                                if let Some(binding) = snipping_tool_ul::hotkey::binding_from_key(
                                     self.settings_modifiers,
-                                    &event.logical_key,
+                                    &event.physical_key,
                                 ) {
                                     sw.config.hotkey.capture = binding;
                                     sw.editing_hotkey = false;
@@ -3055,20 +2998,14 @@ impl ApplicationHandler<UserEvent> for App {
                                 size.height,
                                 dpi,
                             );
-                            if let Some(i) = o.annotations.iter().rposition(|a| {
-                                hit_test_annotation(
-                                    a,
-                                    &pos,
-                                    self.editor_view.annotation_hit_slop(
-                                        o.screenshot.width,
-                                        o.screenshot.height,
-                                        size.width,
-                                        size.height,
-                                        dpi,
-                                    ),
-                                )
-                            }) {
-                                o.selected_index = Some(i);
+                            let slop = self.editor_view.annotation_hit_slop(
+                                o.screenshot.width,
+                                o.screenshot.height,
+                                size.width,
+                                size.height,
+                                dpi,
+                            );
+                            if o.select_for_context_menu(&pos, slop).is_some() {
                                 self.editor_ui.annotation_anchor = point;
                                 self.editor_ui.header.menu =
                                     snipping_tool_ul::launcher::Menu::Annotation;
@@ -3430,6 +3367,7 @@ impl ApplicationHandler<UserEvent> for App {
                                         _ => return,
                                     };
                                     overlay.finish_annotation_drag();
+                                    overlay.discard_tool_stroke();
                                     overlay.active_tool = tool;
                                     overlay.selected_index = None;
                                     self.needs_redraw = true;
@@ -3603,18 +3541,8 @@ impl ApplicationHandler<UserEvent> for App {
                             overlay.step_marker_tool.on_mouse_move(pos);
                         }
                         ToolKind::Eyedropper => {
-                            // Read color from screenshot pixels at cursor position
-                            let px = pos.x as u32;
-                            let py = pos.y as u32;
-                            if px < overlay.screenshot.width && py < overlay.screenshot.height {
-                                let idx = ((py * overlay.screenshot.width + px) * 4) as usize;
-                                if idx + 3 < overlay.screenshot.pixels.len() {
-                                    let r = overlay.screenshot.pixels[idx] as f32 / 255.0;
-                                    let g = overlay.screenshot.pixels[idx + 1] as f32 / 255.0;
-                                    let b = overlay.screenshot.pixels[idx + 2] as f32 / 255.0;
-                                    overlay.eyedropper_preview = Some(Color::new(r, g, b, 1.0));
-                                }
-                            }
+                            // Outside the image there is no color to pick.
+                            overlay.eyedropper_preview = overlay.sample_color(&pos);
                             self.needs_redraw = true;
                         }
                     }

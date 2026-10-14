@@ -70,9 +70,45 @@ pub struct EditorUi {
     base_cache: std::cell::RefCell<Option<BaseCache>>,
 }
 
+/// The chrome is mostly repeated rows (flat glass, the canvas well's sides),
+/// so it is kept as one copy of each run of identical rows: about 0.14 MB
+/// instead of a 5 MB full frame at the default size, 0.4 MB instead of 33 MB
+/// at 4K. Replaying it is a row copy per row and byte-identical.
 struct BaseCache {
     key: (u32, u32, u32, crate::theme::ThemeMode, u8),
-    data: Vec<u8>,
+    /// One stored row per run, and how many consecutive rows repeat it.
+    rows: Vec<u8>,
+    runs: Vec<u32>,
+}
+impl BaseCache {
+    fn new(key: (u32, u32, u32, crate::theme::ThemeMode, u8), data: &[u8], stride: usize) -> Self {
+        let (mut rows, mut runs) = (Vec::new(), Vec::<u32>::new());
+        let mut last: Option<&[u8]> = None;
+        for row in data.chunks_exact(stride) {
+            match (last, runs.last_mut()) {
+                (Some(prev), Some(n)) if prev == row => *n += 1,
+                _ => {
+                    rows.extend_from_slice(row);
+                    runs.push(1);
+                    last = Some(row);
+                }
+            }
+        }
+        rows.shrink_to_fit();
+        Self { key, rows, runs }
+    }
+    fn restore(&self, data: &mut [u8], stride: usize) {
+        let mut out = data.chunks_exact_mut(stride);
+        for (row, n) in self.rows.chunks_exact(stride).zip(&self.runs) {
+            for dst in out.by_ref().take(*n as usize) {
+                dst.copy_from_slice(row);
+            }
+        }
+    }
+    /// Bytes held, for memory measurements.
+    fn bytes(&self) -> usize {
+        self.rows.capacity() + self.runs.capacity() * 4
+    }
 }
 impl EditorUi {
     pub fn new(config: &crate::config::Config) -> Self {
@@ -129,7 +165,7 @@ impl EditorUi {
         Rect::new(18., 68., w - 36., (h - 208.).max(1.))
     }
     fn context_x(w: f32) -> f32 {
-        (w - 347.) / 2.
+        (w - 349.) / 2.
     }
     pub fn size_slider(w: f32, h: f32, _state: &OverlayState) -> Rect {
         let x = Self::context_x(w);
@@ -169,8 +205,8 @@ impl EditorUi {
         if state.size_kind() != crate::editing::SizeKind::None {
             targets.extend([
                 Target::new(x + 66., y, 28., 30., Action::SizeDown),
-                Target::new(x + 101., y, 68., 30., Action::EditSize),
-                Target::new(x + 319., y, 28., 30., Action::SizeUp),
+                Target::new(x + 100., y, 68., 30., Action::EditSize),
+                Target::new(x + 321., y, 28., 30., Action::SizeUp),
                 Target::new(
                     x + 180.,
                     y,
@@ -187,8 +223,9 @@ impl EditorUi {
         let ty = h - 90.;
         if self.header.menu == Menu::Annotation {
             return vec![Target::new(
-                self.annotation_anchor.x.clamp(18., w - 208.),
-                self.annotation_anchor.y.clamp(55., h - 180.),
+                // A minimized window is 0x0; keep the bounds ordered.
+                self.annotation_anchor.x.clamp(18., (w - 208.).max(18.)),
+                self.annotation_anchor.y.clamp(55., (h - 180.).max(55.)),
                 190.,
                 34.,
                 Action::DeleteAnnotation,
@@ -344,12 +381,12 @@ impl EditorUi {
             crate::theme::mode(),
             crate::theme::glass_alpha(),
         );
+        // The key includes width and height, so a hit always fits the frame.
+        let stride = p.width() as usize * 4;
         let mut cached = self.base_cache.borrow_mut();
-        if let Some(cache) = cached.as_ref() {
-            if cache.key == key && cache.data.len() == p.data().len() {
-                p.data_mut().copy_from_slice(&cache.data);
-                return;
-            }
+        if let Some(cache) = cached.as_ref().filter(|c| c.key == key) {
+            cache.restore(p.data_mut(), stride);
+            return;
         }
         ui::glass_fill(p);
         let (w, h) = (p.width() as f32 / dpi, p.height() as f32 / dpi);
@@ -360,14 +397,18 @@ impl EditorUi {
             icons: &mut icons,
         };
         c.round(Self::canvas_rect(w, h), 8., crate::theme::bg_0(), 0.20);
-        *cached = Some(BaseCache {
-            key,
-            data: p.data().to_vec(),
-        });
+        *cached = Some(BaseCache::new(key, p.data(), stride));
     }
 
-    /// Free the cached chrome layer; it is a full frame, so it must not
-    /// outlive the editor window.
+    /// Bytes held by the chrome cache, for memory measurements.
+    pub fn frame_cache_bytes(&self) -> usize {
+        self.base_cache
+            .borrow()
+            .as_ref()
+            .map_or(0, BaseCache::bytes)
+    }
+
+    /// Free the cached chrome layer; it must not outlive the editor window.
     pub fn release_frame_cache(&mut self) {
         *self.base_cache.get_mut() = None;
     }
@@ -430,7 +471,7 @@ impl EditorUi {
                 .clone()
                 .unwrap_or_else(|| format!("{} px", state.tool_size()));
             c.button(
-                Rect::new(cx + 101., cy, 68., 30.),
+                Rect::new(cx + 100., cy, 68., 30.),
                 &value,
                 None,
                 false,
@@ -438,7 +479,7 @@ impl EditorUi {
                 true,
             );
             c.button(
-                Rect::new(cx + 319., cy, 28., 30.),
+                Rect::new(cx + 321., cy, 28., 30.),
                 "+",
                 None,
                 false,
@@ -475,7 +516,7 @@ impl EditorUi {
             (25., "Undo"),
             (62., "Redo"),
             (466., "Color"),
-            (523., "Tools"),
+            (522., "Tools"),
             (578., "Zoom"),
         ] {
             c.centered_in(
@@ -485,11 +526,12 @@ impl EditorUi {
                 ui::muted(),
             );
         }
+        // Undo and Redo match the tool icons: 18 pixels, centred on their targets.
         c.icon(
             "undo",
-            tx + 15.,
+            tx + 16.,
             ty + 14.,
-            17.,
+            18.,
             if state.undo_stack.is_empty() {
                 (143, 137, 153)
             } else {
@@ -498,9 +540,9 @@ impl EditorUi {
         );
         c.icon(
             "redo",
-            tx + 52.,
+            tx + 53.,
             ty + 14.,
-            17.,
+            18.,
             if state.redo_stack.is_empty() {
                 (143, 137, 153)
             } else {
@@ -553,11 +595,11 @@ impl EditorUi {
             ),
             1.,
         );
-        c.icon("down", tx + 472., ty + 15., 15., ui::muted());
-        c.icon("more", tx + 514., ty + 14., 18., ui::ink());
-        c.centered(
-            tx + 578.,
-            ty + 17.,
+        c.icon("down", tx + 472., ty + 15.5, 15., ui::muted());
+        c.icon("more", tx + 513., ty + 14., 18., ui::ink());
+        // Zoom text shares the icons' middle line instead of sitting below it.
+        c.centered_in(
+            Rect::new(tx + 552., ty + 7., 52., 32.),
             &format!("{}%", (zoom * 100.).round() as u32),
             11.,
             ui::muted(),

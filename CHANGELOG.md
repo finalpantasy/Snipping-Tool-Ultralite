@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Fixed a possible crash when the editor was minimized from the keyboard with the annotation menu open.
+- Fixed right-click during a text edit selecting, deleting or resizing the wrong annotation.
+- Region drags that reach the right or bottom screen edge now include the last pixel column or row.
+- The shortcut recorder accepts Ctrl+Shift+digit and digits on AZERTY keyboards.
+- Switching tools mid-drag no longer leaves a ghost shape; the eyedropper no longer picks colors from outside the image; a failed history copy now says why.
+- The editor holds about 5 MB less memory at the default size (33 MB less at 4K), and Copy, Save, Upload and Pin without annotations use half the peak memory.
+- Alignment pass: toolbar labels share one baseline, dropdown, gear, Undo/Redo, zoom, Settings title, host menu, upload notice and History grid are centred. See [the pass notes](docs/POLISH-PASS-2026-10-14.md).
+
 ## 0.3.23 preview
 
 - Fixed an older instance, still running after an upgrade, reclaiming Start on login when Settings were saved. Startup now keeps a registration that points at a newer installed version.

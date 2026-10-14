@@ -8,7 +8,7 @@ use crate::config::Config;
 use crate::geometry::{Color, Point};
 use crate::icons::IconCache;
 use crate::theme;
-use crate::ui::{measure, text_bounds, Canvas, Rect};
+use crate::ui::{measure, Canvas, Rect};
 
 /// Width / height of the settings window in logical pixels.
 pub const WIN_W: u32 = 420;
@@ -140,8 +140,7 @@ impl Painter<'_> {
 
     /// Draw text whose cap height is centered on `mid`.
     fn text_mid(&mut self, x: f32, mid: f32, text: &str, size: f32, rgb: (u8, u8, u8)) {
-        let (_, y0, _, y1) = text_bounds("H", size * self.c.scale);
-        let top = mid - (y0 + y1) / 2. / self.c.scale;
+        let top = self.c.cap_centered_top(mid, size);
         self.c.label(x, top, text, size, rgb);
     }
 
@@ -151,9 +150,9 @@ impl Painter<'_> {
     }
 
     fn header(&mut self) {
+        // The title's caps share the gear's middle line.
         self.c.icon("gear", LEFT, 18., 22., theme::text_normal());
-        self.c
-            .label(LEFT + 32., 20., "Settings", 16., theme::text_normal());
+        self.text_mid(LEFT + 32., 29., "Settings", 16., theme::text_normal());
     }
 
     fn tabs(&mut self, active: usize) {

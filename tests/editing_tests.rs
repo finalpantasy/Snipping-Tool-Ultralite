@@ -216,3 +216,39 @@ fn pencil_preserves_close_cursor_samples_and_renders_a_single_click() {
     tools::render_annotation(&dot, &mut p, None, None);
     assert!(p.pixel(40, 40).unwrap().alpha() > 0);
 }
+
+#[test]
+fn annotation_menu_survives_a_minimized_zero_size_editor() {
+    // A minimized window reports 0x0; clamp bounds must not invert and panic.
+    let o = state(200, 100);
+    let mut ui = EditorUi::new(&Config::default());
+    ui.header.menu = snipping_tool_ul::launcher::Menu::Annotation;
+    let _ = ui.hover(Point::new(-1., -1.), 0., 0., &o);
+    let _ = ui.hit(Point::new(5., 5.), 0., 0., &o);
+}
+#[test]
+fn eyedropper_has_no_color_outside_the_image() {
+    let mut o = state(4, 3);
+    o.screenshot.pixels[..4].copy_from_slice(&[255, 0, 0, 255]);
+    let red = Color::new(1., 0., 0., 1.);
+    assert_eq!(o.sample_color(&Point::new(0.5, 0.5)), Some(red));
+    // Left of or above the image used to clamp onto the first column or row.
+    assert_eq!(o.sample_color(&Point::new(-3., 0.5)), None);
+    assert_eq!(o.sample_color(&Point::new(0.5, -0.2)), None);
+    assert_eq!(o.sample_color(&Point::new(4., 1.)), None);
+    assert_eq!(o.sample_color(&Point::new(1., 3.)), None);
+    assert_eq!(o.sample_color(&Point::new(f32::NAN, 1.)), None);
+}
+#[test]
+fn switching_tools_mid_drag_leaves_no_stale_shape() {
+    let mut o = state(200, 100);
+    o.active_tool = ToolKind::Rectangle;
+    o.rectangle_tool.on_mouse_down(Point::new(10., 10.));
+    o.rectangle_tool.on_mouse_move(Point::new(60., 50.));
+    assert!(o.in_progress().is_some());
+    // A keyboard shortcut switches tools before the mouse is released.
+    o.discard_tool_stroke();
+    o.active_tool = ToolKind::Arrow;
+    o.active_tool = ToolKind::Rectangle;
+    assert!(o.in_progress().is_none());
+}

@@ -342,7 +342,10 @@ pub fn render_overlay(state: &mut OverlayState, pixmap: &mut tiny_skia::Pixmap) 
             }
 
             use crate::tools::render_text_annotation;
-            let text_pos = crate::geometry::Point::new(pill_x + pad_x, pill_y + pad_y);
+            let text_pos = crate::geometry::Point::new(
+                pill_x + pad_x,
+                crate::ui::cap_centered_top(pill_y + pill_h / 2.0, font_size, 1.0),
+            );
             let white = crate::theme::gcolor(crate::theme::text_normal(), 1.0);
             render_text_annotation(pixmap, &text_pos, &hex, &white, font_size);
         }
@@ -646,8 +649,8 @@ fn render_toolbar(state: &mut OverlayState, selection: &Selection, pixmap: &mut 
                 inactive_hex.as_str()
             };
             if let Some(icon_pixmap) = state.icon_cache.get_or_render(name, icon_size, color_hex) {
-                let icon_x = (bx + (bw - icon_size as f32) / 2.0) as i32;
-                let icon_y = (by + (bh - icon_size as f32) / 2.0) as i32;
+                let icon_x = (bx + (bw - icon_size as f32) / 2.0).round() as i32;
+                let icon_y = (by + (bh - icon_size as f32) / 2.0).round() as i32;
                 blend_pixmap(pixmap, icon_pixmap, icon_x, icon_y);
             }
         }
@@ -751,7 +754,11 @@ fn render_toolbar(state: &mut OverlayState, selection: &Selection, pixmap: &mut 
 
             // Text
             use crate::tools::render_text_annotation;
-            let text_pos = crate::geometry::Point::new(tip_x + pad_x, tip_y + pad_y);
+            // Centre the caps; the line box would sit the text 2-3 pixels low.
+            let text_pos = crate::geometry::Point::new(
+                tip_x + pad_x,
+                crate::ui::cap_centered_top(tip_y + tip_h / 2.0, font_size, 1.0),
+            );
             let white = crate::theme::gcolor(crate::theme::text_normal(), 1.0);
             render_text_annotation(pixmap, &text_pos, label, &white, font_size);
         }
@@ -816,7 +823,10 @@ fn render_size_label(
 
     // Render text on top via the shared single-line text path
     use crate::tools::render_text_annotation;
-    let text_pos = crate::geometry::Point::new(pill_x + pad_x, pill_y + pad_y);
+    let text_pos = crate::geometry::Point::new(
+        pill_x + pad_x,
+        crate::ui::cap_centered_top(pill_y + pill_h / 2.0, font_size, 1.0),
+    );
     let white = crate::theme::gcolor(crate::theme::text_normal(), 1.0);
     render_text_annotation(pixmap, &text_pos, &label, &white, font_size);
 }

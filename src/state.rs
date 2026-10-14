@@ -72,6 +72,36 @@ pub struct OverlayState {
 }
 
 impl OverlayState {
+    /// Selects the topmost annotation under `pos` for the right-click menu.
+    /// Pending text is committed first: a text re-edit removes its annotation
+    /// from the list, so indices found before the commit would go stale.
+    pub fn select_for_context_menu(&mut self, pos: &Point, slop: f32) -> Option<usize> {
+        self.commit_text();
+        let hit = self
+            .annotations
+            .iter()
+            .rposition(|a| crate::tools::hit_test_annotation(a, pos, slop));
+        if hit.is_some() {
+            self.selected_index = hit;
+        }
+        hit
+    }
+    /// The screenshot color under `pos`, or `None` outside the image. A plain
+    /// cast would clamp negative positions onto the first row or column.
+    pub fn sample_color(&self, pos: &Point) -> Option<Color> {
+        let (w, h) = (self.screenshot.width, self.screenshot.height);
+        if !(pos.x >= 0. && pos.y >= 0. && pos.x < w as f32 && pos.y < h as f32) {
+            return None;
+        }
+        let i = ((pos.y as u32 * w + pos.x as u32) * 4) as usize;
+        let p = self.screenshot.pixels.get(i..i + 3)?;
+        Some(Color::new(
+            p[0] as f32 / 255.,
+            p[1] as f32 / 255.,
+            p[2] as f32 / 255.,
+            1.,
+        ))
+    }
     /// Commit active text before a toolbar action exports or changes tools.
     pub fn commit_text(&mut self) {
         if !self.text_input_active {
@@ -241,6 +271,11 @@ impl OverlayState {
     pub fn flattened_selection(&self) -> Option<(Vec<u8>, u32, u32)> {
         if self.preview_mode {
             let (pixels, w, h, annotations) = self.export_selection()?;
+            // With nothing to draw the crop is already the result; flattening
+            // would copy it again, doubling peak memory (66 MB at 4K).
+            if annotations.is_empty() {
+                return Some((pixels, w, h));
+            }
             return Some((
                 crate::export::flatten_annotations(&pixels, w, h, &annotations),
                 w,

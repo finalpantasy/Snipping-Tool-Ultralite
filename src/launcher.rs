@@ -150,10 +150,10 @@ impl Model {
         let mut targets = Vec::new();
         if !self.upload_feedback.busy() {
             targets.push(Target::new(
-                r.x + r.w - 28.,
-                r.y + 7.,
-                22.,
-                22.,
+                r.x + r.w - 29.,
+                r.y + 11.,
+                24.,
+                24.,
                 Action::DismissUploadFeedback,
             ));
         }
@@ -167,15 +167,19 @@ impl Model {
         let r = self.feedback_rect(w, editor);
         c.round(r, 10., ui::panel(), 1.);
         c.outline(r, 10., ui::focus_color(), 1.);
+        // Heading caps and the close glyph share one middle line, which is
+        // also the centre of the close target.
+        let middle = r.y + 23.;
+        let top = c.cap_centered_top(middle, 14.);
         c.label(
             r.x + 14.,
-            r.y + 13.,
+            top,
             self.upload_feedback.heading(),
             14.,
             ui::ink(),
         );
         if !self.upload_feedback.busy() {
-            c.centered(r.x + r.w - 17., r.y + 9., "×", 17., ui::muted());
+            c.icon("close", r.x + r.w - 24., middle - 7., 14., ui::muted());
         }
         let scale = c.scale;
         let fit = |text: &str| {
@@ -388,32 +392,26 @@ impl Model {
             CaptureMode::Window => "Window",
             CaptureMode::FullScreen => "Full screen",
         };
-        c.button(
+        c.dropdown(
             Rect::new(114., 15., 128., 32.),
             name,
-            Some(match self.mode {
+            match self.mode {
                 CaptureMode::Region => "crop",
                 CaptureMode::Window => "window",
                 CaptureMode::FullScreen => "screen",
-            }),
-            false,
+            },
             h(Action::ToggleModes),
-            true,
         );
-        c.icon("down", 224., 24., 14., ui::muted());
-        c.button(
+        c.dropdown(
             Rect::new(250., 15., 95., 32.),
             &if self.delay == 0 {
                 "Delay".into()
             } else {
                 format!("{} s", self.delay)
             },
-            Some("clock"),
-            false,
+            "clock",
             h(Action::ToggleDelay),
-            true,
         );
-        c.icon("down", 328., 24., 14., ui::muted());
         if editor {
             c.button(
                 Rect::new(w - 309., 15., 82., 32.),
@@ -444,9 +442,10 @@ impl Model {
                 true,
             );
             if h(Action::ToggleOptions) {
-                c.round(Rect::new(w - 33., 15., 30., 32.), 6., (255, 255, 255), 0.09);
+                c.round(Rect::new(w - 33., 15., 28., 32.), 6., (255, 255, 255), 0.09);
             }
-            c.icon("gear", w - 26., 22., 18., ui::muted());
+            // Centre the gear on its 28-pixel target.
+            c.icon("gear", w - 28., 22., 18., ui::muted());
         } else {
             c.button(
                 Rect::new(w - 217., 15., 96., 32.),
@@ -613,7 +612,13 @@ impl Model {
                 Action::Quit => "power",
                 _ => "gear",
             };
-            c.icon(icon, t.rect.x + 10., t.rect.y + 8., 16., ui::muted());
+            c.icon(
+                icon,
+                t.rect.x + 10.,
+                t.rect.y + t.rect.h / 2. - 8.,
+                16.,
+                ui::muted(),
+            );
             c.label(
                 t.rect.x + 36.,
                 t.rect.y + if self.menu == Menu::Hosts { 3. } else { 7. },
@@ -710,7 +715,7 @@ impl Model {
                 c.icon(
                     "check",
                     t.rect.x + t.rect.w - 26.,
-                    t.rect.y + 9.,
+                    t.rect.y + t.rect.h / 2. - 7.,
                     14.,
                     (149, 198, 169),
                 );
