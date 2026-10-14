@@ -67,8 +67,11 @@ struct Picker {
     selected: Option<ScreenRect>,
     done: bool,
     border: HWND,
-    /// Shows the selection's exact size in pixels; may be null.
+    /// Shows the selection's exact size in pixels. Created on the first
+    /// selection, after the picker is on screen; may stay null.
     readout: HWND,
+    readout_tried: bool,
+    instance: HINSTANCE,
     windows: *const crate::window_detect::WinRect,
     windows_len: usize,
     window_mode: bool,
@@ -325,6 +328,33 @@ unsafe extern "system" fn readout_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPA
     }
 }
 
+/// Creates the size label once per picker, outside the path that puts the
+/// frozen screen up, so starting a snip does no extra work.
+unsafe fn ensure_readout(pointer: *mut Picker) {
+    if (*pointer).readout_tried {
+        return;
+    }
+    (*pointer).readout_tried = true;
+    let instance = (*pointer).instance;
+    // No reference into the picker state is held across this call.
+    let readout = CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+        w!("SnippingToolUL.Readout"),
+        w!("Snipping Tool UL selection size"),
+        WS_POPUP,
+        0,
+        0,
+        1,
+        1,
+        None,
+        None,
+        instance,
+        None,
+    )
+    .unwrap_or_default();
+    (*pointer).readout = readout;
+}
+
 unsafe extern "system" fn picker_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if msg == WM_NCCREATE {
         let create = &*(lp.0 as *const CREATESTRUCTW);
@@ -336,6 +366,7 @@ unsafe extern "system" fn picker_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
             WM_LBUTTONDOWN => {
                 (*pointer).start = cursor(hwnd, lp);
                 SetCapture(hwnd);
+                ensure_readout(pointer);
                 // Win32 calls can synchronously re-enter this procedure. Never
                 // keep a borrowed mutable state reference across those calls.
                 let snapshot = *pointer;
@@ -345,6 +376,9 @@ unsafe extern "system" fn picker_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
                 return LRESULT(0);
             }
             WM_MOUSEMOVE => {
+                if (*pointer).window_mode {
+                    ensure_readout(pointer);
+                }
                 let snapshot = *pointer;
                 if let Some(end) = cursor(hwnd, lp) {
                     update_selection(hwnd, &snapshot, end);
@@ -503,29 +537,15 @@ fn select(
             None,
         )
         .map_err(|e| e.to_string())?;
-        // Optional: the picker still works without its size label.
-        let readout = CreateWindowExW(
-            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
-            readout_class.lpszClassName,
-            w!("Snipping Tool UL selection size"),
-            WS_POPUP,
-            0,
-            0,
-            1,
-            1,
-            None,
-            None,
-            instance,
-            None,
-        )
-        .unwrap_or_default();
         let mut state = Picker {
             bounds,
             start: None,
             selected: None,
             done: false,
             border,
-            readout,
+            readout: HWND::default(),
+            readout_tried: false,
+            instance,
             windows: windows.as_ptr(),
             windows_len: windows.len(),
             window_mode,
@@ -547,14 +567,12 @@ fn select(
             Ok(hwnd) => hwnd,
             Err(e) => {
                 let _ = DestroyWindow(border);
-                let _ = DestroyWindow(readout);
                 return Err(e.to_string());
             }
         };
         if let Err(e) = SetLayeredWindowAttributes(veil, COLORREF(0), 70, LWA_ALPHA) {
             let _ = DestroyWindow(veil);
             let _ = DestroyWindow(border);
-            let _ = DestroyWindow(readout);
             return Err(e.to_string());
         }
         surface.veil = veil;
@@ -563,7 +581,6 @@ fn select(
         if surface.paint_failed {
             let _ = DestroyWindow(veil);
             let _ = DestroyWindow(border);
-            let _ = DestroyWindow(readout);
             return Err("Could not display the frozen screen".into());
         }
         let _ = ShowWindow(veil, SW_SHOW);
@@ -589,11 +606,11 @@ fn select(
             DispatchMessageW(&message);
         }
         let _ = ShowWindow(border, SW_HIDE);
-        let _ = ShowWindow(readout, SW_HIDE);
+        let _ = ShowWindow(state.readout, SW_HIDE);
         let _ = ShowWindow(veil, SW_HIDE);
         let _ = ShowWindow(frozen.0, SW_HIDE);
         let _ = DestroyWindow(border);
-        let _ = DestroyWindow(readout);
+        let _ = DestroyWindow(state.readout);
         let _ = DestroyWindow(veil);
         drop(frozen);
         if surface.paint_failed {
@@ -866,6 +883,8 @@ mod tests {
             done: false,
             border: HWND::default(),
             readout: HWND::default(),
+            readout_tried: false,
+            instance: HINSTANCE::default(),
             windows: std::ptr::null(),
             windows_len: 0,
             window_mode: false,
@@ -1035,6 +1054,8 @@ mod tests {
             done: false,
             border: HWND::default(),
             readout: HWND::default(),
+            readout_tried: false,
+            instance: HINSTANCE::default(),
             windows: std::ptr::null(),
             windows_len: 0,
             window_mode: false,
