@@ -291,7 +291,7 @@ fn settings(out: &mut String, dir: &Path, mode: &str, s: f32) {
 fn about_window(out: &mut String, dir: &Path, mode: &str, s: f32) {
     let (w, h) = (about::WIDTH as f32, about::HEIGHT as f32);
     let mut p = Pixmap::new((w * s) as u32, (h * s) as u32).unwrap();
-    about::draw(&mut p, false);
+    about::draw(&mut p, false, false);
     let _ = writeln!(out, "\n## about, {mode}, {}%", (s * 100.) as u32);
     control(
         out,
@@ -302,6 +302,7 @@ fn about_window(out: &mut String, dir: &Path, mode: &str, s: f32) {
         false,
     );
     control(out, &p, s, "Close", about::close_rect(), false);
+    control(out, &p, s, "Support on Ko-fi", about::support_rect(), false);
     save(&p, dir, "about", mode, s);
 }
 

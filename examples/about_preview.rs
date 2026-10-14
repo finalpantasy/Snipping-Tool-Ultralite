@@ -14,7 +14,7 @@ fn main() {
                 (about::HEIGHT as f32 * dpi) as u32,
             )
             .unwrap();
-            about::draw(&mut frame, false);
+            about::draw(&mut frame, false, false);
             frame
                 .save_png(output.join(format!("{name}-about-{}.png", (dpi * 100.) as u32)))
                 .unwrap();

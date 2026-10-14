@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- About now has a **Support on Ko-fi** button that opens ko-fi.com/finalpantasy in your browser.
+
 ## 0.3.24 preview
 
 - Weekly update check, on by default: at most once every 7 days, at start, the app asks GitHub whether a newer version exists and shows an **Update available** link in Home and the tray menu. It never downloads or installs anything. Turn it off in **Settings > General > Check for updates weekly**.

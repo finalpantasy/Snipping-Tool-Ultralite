@@ -42,6 +42,9 @@ fn get_svg(name: &str) -> Option<String> {
             r#"<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m3 16 5-5 4 4 3-3 6 6"/><circle cx="15" cy="8" r="1"/>"#
         }
         "history" => r#"<path d="M3 11a9 9 0 1 1 2 7M3 4v7h7M12 7v5l3 2"/>"#,
+        "coffee" => {
+            r#"<path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"/><path d="M6 2v2"/>"#
+        }
         // Bounds 4..20 on both axes keep the arrows centred in their box.
         "undo" => r#"<path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>"#,
         "redo" => r#"<path d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>"#,

@@ -20,12 +20,41 @@ pub const WIDTH: u32 = 440;
 pub const HEIGHT: u32 = 300;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+pub const SUPPORT_URL: &str = "https://ko-fi.com/finalpantasy";
+
+/// The two buttons are centred as one row: Support (160) + 12 gap + Close (112).
+pub fn support_rect() -> Rect {
+    Rect::new(78., 242., 160., 36.)
+}
+
 pub fn close_rect() -> Rect {
-    Rect::new(164., 242., 112., 36.)
+    Rect::new(250., 242., 112., 36.)
+}
+
+/// Opens the Ko-fi page in the default browser; no other address is opened.
+pub fn open_support_page() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let explorer = std::env::var_os("WINDIR")
+            .map(std::path::PathBuf::from)
+            .ok_or("Windows folder unavailable")?
+            .join("explorer.exe");
+        std::process::Command::new(explorer)
+            .arg(SUPPORT_URL)
+            .creation_flags(0x08000000)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("Opening a browser is Windows-only".into())
+    }
 }
 
 /// Uses the same physical-pixel font rendering and frost as the main window.
-pub fn draw(frame: &mut Pixmap, hovered: bool) {
+pub fn draw(frame: &mut Pixmap, close_hover: bool, support_hover: bool) {
     ui::glass_fill(frame);
     let scale = frame.width() as f32 / WIDTH as f32;
     // Decode the supplied high-resolution mark only when About is first opened.
@@ -89,7 +118,15 @@ pub fn draw(frame: &mut Pixmap, hovered: bool) {
         12.,
         ui::muted(),
     );
-    c.button(close_rect(), "Close", None, true, hovered, true);
+    c.button(
+        support_rect(),
+        "Support on Ko-fi",
+        Some("coffee"),
+        false,
+        support_hover,
+        true,
+    );
+    c.button(close_rect(), "Close", None, true, close_hover, true);
 }
 
 pub struct AboutWindow {
@@ -99,6 +136,7 @@ pub struct AboutWindow {
     frame: Pixmap,
     pointer: Point,
     pressed_close: bool,
+    pressed_support: bool,
 }
 
 impl AboutWindow {
@@ -126,6 +164,7 @@ impl AboutWindow {
             frame,
             pointer: Point::new(-1., -1.),
             pressed_close: false,
+            pressed_support: false,
         };
         about.render()?;
         Ok(about)
@@ -144,7 +183,11 @@ impl AboutWindow {
         if (self.frame.width(), self.frame.height()) != (size.width, size.height) {
             self.frame = Pixmap::new(size.width, size.height).ok_or("About allocation failed")?;
         }
-        draw(&mut self.frame, close_rect().contains(self.pointer));
+        draw(
+            &mut self.frame,
+            close_rect().contains(self.pointer),
+            support_rect().contains(self.pointer),
+        );
         self.surface.present(&self.frame)
     }
 
@@ -162,10 +205,11 @@ impl AboutWindow {
                 return true
             }
             WindowEvent::CursorMoved { position, .. } => {
-                let old = close_rect().contains(self.pointer);
+                let hover = |p: Point| (close_rect().contains(p), support_rect().contains(p));
+                let old = hover(self.pointer);
                 let scale = self.window.inner_size().width.max(1) as f32 / WIDTH as f32;
                 self.pointer = Point::new(position.x as f32 / scale, position.y as f32 / scale);
-                if old != close_rect().contains(self.pointer) {
+                if old != hover(self.pointer) {
                     self.window.request_redraw();
                 }
             }
@@ -173,7 +217,10 @@ impl AboutWindow {
                 self.pointer = Point::new(-1., -1.);
                 self.window.request_redraw();
             }
-            WindowEvent::Focused(false) => self.pressed_close = false,
+            WindowEvent::Focused(false) => {
+                self.pressed_close = false;
+                self.pressed_support = false;
+            }
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Left,
@@ -181,10 +228,20 @@ impl AboutWindow {
             } => {
                 if *state == ElementState::Pressed {
                     self.pressed_close = close_rect().contains(self.pointer);
-                } else if std::mem::take(&mut self.pressed_close)
-                    && close_rect().contains(self.pointer)
-                {
-                    return true;
+                    self.pressed_support = support_rect().contains(self.pointer);
+                } else {
+                    let support = std::mem::take(&mut self.pressed_support)
+                        && support_rect().contains(self.pointer);
+                    if support {
+                        if let Err(e) = open_support_page() {
+                            tracing::error!("Could not open the Ko-fi page: {e}");
+                        }
+                    }
+                    if std::mem::take(&mut self.pressed_close)
+                        && close_rect().contains(self.pointer)
+                    {
+                        return true;
+                    }
                 }
             }
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {

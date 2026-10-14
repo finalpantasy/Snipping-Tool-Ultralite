@@ -1,6 +1,6 @@
 [package]
 name = "snipping-tool-ul"
-version = "0.3.24"
+version = "0.3.25"
 authors = ["Snipping Tool UL contributors"]
 description = "Snipping Tool UL: lightweight Windows screenshot capture, clipboard, annotation and image sharing"
 license = "MIT"
