@@ -45,6 +45,8 @@ use snipping_tool_ul::window_detect;
 struct SnipResult {
     screen: capture::CapturedScreen,
     clipboard_error: Option<String>,
+    /// Clipboard sequence number after the automatic copy succeeded.
+    clipboard_sequence: Option<u32>,
 }
 
 enum UserEvent {
@@ -59,6 +61,21 @@ enum UserEvent {
         revision: u64,
         message: String,
         upload_done: bool,
+    },
+    /// Private details found for "Hide private info", in pixels of the
+    /// selection that starts at `origin` in the screenshot.
+    RedactFinished {
+        operation: u64,
+        revision: u64,
+        origin: (u32, u32),
+        size: (u32, u32),
+        result: Result<Vec<snipping_tool_ul::redact::Area>, String>,
+    },
+    /// A Copy click finished; the clipboard now holds these annotations.
+    Copied {
+        revision: u64,
+        annotations: Vec<snipping_tool_ul::tools::Annotation>,
+        sequence: u32,
     },
     ExportFinished {
         copy_done: bool,
@@ -134,6 +151,14 @@ struct App {
     capture_at: Option<Instant>,
     _hotkey_manager: Option<global_hotkey::GlobalHotKeyManager>,
     hotkey_id: Option<u32>,
+    /// Snips the previous area again without the picker.
+    _repeat_hotkey_manager: Option<global_hotkey::GlobalHotKeyManager>,
+    repeat_hotkey_id: Option<u32>,
+    registered_repeat_hotkey: Option<String>,
+    /// The last snip's area in desktop pixels, for the repeat shortcut.
+    last_region: Option<capture::ScreenRect>,
+    /// Set by the repeat shortcut and taken by the next capture.
+    repeat_region: Option<capture::ScreenRect>,
     registered_hotkey: Option<String>,
     /// Set once the working set has been trimmed for the current tray-idle period.
     idle_trimmed: bool,
@@ -219,6 +244,11 @@ impl App {
             capture_at: None,
             _hotkey_manager: None,
             hotkey_id: None,
+            _repeat_hotkey_manager: None,
+            repeat_hotkey_id: None,
+            registered_repeat_hotkey: None,
+            last_region: None,
+            repeat_region: None,
             registered_hotkey: None,
             idle_trimmed: false,
             pinned_windows: Vec::new(),
@@ -301,6 +331,7 @@ impl App {
                 .registered_hotkey
                 .clone()
                 .unwrap_or_else(|| "Unavailable".into());
+            home.model.repeat_hotkey = self.registered_repeat_hotkey.clone();
             let _ = home.render();
             snipping_tool_ul::ui::restore_after_capture(&home.window);
             home.window.focus_window();
@@ -442,6 +473,12 @@ impl App {
             }
             HomeAction::ResetZoom => {
                 self.editor_view = Default::default();
+                self.needs_redraw = true;
+            }
+            HomeAction::DragOut => self.drag_out(),
+            HomeAction::Redact => {
+                self.editor_ui.header.menu = snipping_tool_ul::launcher::Menu::None;
+                self.do_redact();
                 self.needs_redraw = true;
             }
             HomeAction::CustomColor => {
@@ -640,6 +677,46 @@ impl App {
         if let Some(tray) = &self.tray {
             tray.update_capture_hotkey(self.registered_hotkey.as_deref());
         }
+        self.register_repeat_hotkey();
+    }
+
+    /// Follows the working capture shortcut. A clash with another app only
+    /// costs this convenience, so it is logged rather than announced.
+    fn register_repeat_hotkey(&mut self) {
+        let wanted = self
+            .registered_hotkey
+            .as_deref()
+            .and_then(snipping_tool_ul::hotkey::repeat_binding);
+        if wanted == self.registered_repeat_hotkey {
+            return;
+        }
+        // Unregister the old combination before the new one is tried.
+        self._repeat_hotkey_manager = None;
+        self.repeat_hotkey_id = None;
+        self.registered_repeat_hotkey = None;
+        if let Some(binding) = wanted {
+            match snipping_tool_ul::hotkey::register_hotkey(&binding) {
+                Ok((manager, id)) => {
+                    self._repeat_hotkey_manager = Some(manager);
+                    self.repeat_hotkey_id = Some(id);
+                    self.registered_repeat_hotkey = Some(binding);
+                }
+                Err(e) => tracing::warn!("Repeat shortcut {binding} unavailable: {e}"),
+            }
+        }
+        self.editor_ui.header.repeat_hotkey = self.registered_repeat_hotkey.clone();
+        if let Some(home) = &mut self.launcher {
+            home.model.repeat_hotkey = self.registered_repeat_hotkey.clone();
+            home.window.request_redraw();
+        }
+    }
+
+    /// Snip the previous area again: same pixels on screen, no picker. With
+    /// no previous snip this is an ordinary capture.
+    fn trigger_repeat_capture(&mut self, event_loop: &ActiveEventLoop) {
+        self.repeat_region = self.last_region;
+        self.start_capture(event_loop, false);
+        self.repeat_region = None;
     }
 
     /// Returns whether any UL window was on screen and has just been hidden.
@@ -707,6 +784,7 @@ impl App {
             if self.picker_active {
                 return;
             }
+            let repeat = self.repeat_region.take();
             // All UL controls are already minimized and hidden. The worker
             // flushes their removal before acquiring the frozen desktop.
             self.countdown = None;
@@ -737,7 +815,7 @@ impl App {
                             let _ = windows::Win32::Graphics::Dwm::DwmFlush();
                         }
                     }
-                    let windows = if matches!(mode, CaptureMode::Window) {
+                    let windows = if repeat.is_none() && matches!(mode, CaptureMode::Window) {
                         snipping_tool_ul::window_detect::enumerate_window_rects()
                     } else {
                         Vec::new()
@@ -745,6 +823,10 @@ impl App {
                     let snapshot: &capture::BgraSnapshot = frozen
                         .insert(capture::capture_frozen_desktop().map_err(|e| e.to_string())?);
                     let rect = match mode {
+                        // A display change can move or remove the old area.
+                        _ if repeat.is_some() => Ok(repeat
+                            .and_then(|r| r.intersect(snapshot.bounds()))
+                            .filter(|r| r.width > 0 && r.height > 0)),
                         CaptureMode::Region => {
                             snipping_tool_ul::region_picker::select_region(snapshot)
                         }
@@ -760,14 +842,16 @@ impl App {
                         let screen = snapshot.region_rgba(rect).map_err(|e| e.to_string())?;
                         // Populate the real Windows clipboard before displaying
                         // the preview.
-                        let clipboard_error = match export::copy_with_ticket(
+                        let copy = export::copy_with_ticket_sequence(
                             clipboard_ticket,
                             &screen.pixels,
                             screen.width,
                             screen.height,
-                        ) {
-                            Ok(true) => None,
-                            Ok(false) => Some(
+                        );
+                        let clipboard_sequence = copy.as_ref().ok().copied().flatten();
+                        let clipboard_error = match copy {
+                            Ok(Some(_)) => None,
+                            Ok(None) => Some(
                                 "A newer clipboard request was kept. Use Copy to copy this image."
                                     .into(),
                             ),
@@ -776,6 +860,7 @@ impl App {
                         Ok(SnipResult {
                             screen,
                             clipboard_error,
+                            clipboard_sequence,
                         })
                     })
                     .transpose()
@@ -892,8 +977,9 @@ impl App {
         &mut self,
         event_loop: &ActiveEventLoop,
         screenshot: capture::CapturedScreen,
-        copied: bool,
+        clipboard_sequence: Option<u32>,
     ) -> Result<(), String> {
+        let copied = clipboard_sequence.is_some();
         self.close_overlay();
         let height = screenshot.height;
         let attrs = WindowAttributes::default()
@@ -930,6 +1016,7 @@ impl App {
                 state.canvas_height = height;
                 state.preview_mode = true;
                 state.active_tool = ToolKind::Pencil;
+                state.clipboard_copy = clipboard_sequence.map(|s| (Vec::new(), s));
                 self.editor_view = Default::default();
                 state.selection = Some(selection);
                 self.state = AppState::Capturing(Box::new(state));
@@ -1051,6 +1138,7 @@ impl App {
                 .registered_hotkey
                 .clone()
                 .unwrap_or_else(|| "Unavailable".into());
+            home.model.repeat_hotkey = self.registered_repeat_hotkey.clone();
             snipping_tool_ul::launcher::style_window(&home.window);
             home.window.request_redraw();
         }
@@ -1172,10 +1260,11 @@ impl App {
         }
         let data = if let AppState::Capturing(ref o) = self.state {
             o.flattened_selection()
+                .map(|data| (data, o.annotations.clone()))
         } else {
             None
         };
-        if let Some((pixels, w, h)) = data {
+        if let Some(((pixels, w, h), annotations)) = data {
             let ticket = snipping_tool_ul::clipboard_queue::reserve();
             let revision = self.image_revision;
             let proxy = self.proxy.clone();
@@ -1193,18 +1282,25 @@ impl App {
                         message: "Copy stopped unexpectedly. Image kept; retry Copy.".into(),
                     },
                 );
-                let (succeeded, message) = match export::copy_with_ticket(ticket, &pixels, w, h) {
-                    Ok(true) => {
-                        if history {
-                            // Repeated Copy clicks must not push older captures out.
-                            let _ =
-                                snipping_tool_ul::history::save_to_history_if_new(&pixels, w, h);
+                let (succeeded, message) =
+                    match export::copy_with_ticket_sequence(ticket, &pixels, w, h) {
+                        Ok(Some(sequence)) => {
+                            ready.send_extra(UserEvent::Copied {
+                                revision,
+                                annotations,
+                                sequence,
+                            });
+                            if history {
+                                // Repeated Copy clicks must not push older captures out.
+                                let _ = snipping_tool_ul::history::save_to_history_if_new(
+                                    &pixels, w, h,
+                                );
+                            }
+                            (true, "Copied to clipboard".into())
                         }
-                        (true, "Copied to clipboard".into())
-                    }
-                    Ok(false) => (false, "A newer clipboard request was kept.".into()),
-                    Err(e) => (false, format!("Copy failed: {e}. Click Copy to retry.")),
-                };
+                        Ok(None) => (false, "A newer clipboard request was kept.".into()),
+                        Err(e) => (false, format!("Copy failed: {e}. Click Copy to retry.")),
+                    };
                 ready.send(UserEvent::ExportFinished {
                     copy_done: true,
                     revision,
@@ -1216,6 +1312,31 @@ impl App {
         } else {
             self.report_export_preparation_failure("Copy failed");
         }
+    }
+
+    /// Drag the image as shown into another app as a PNG file. Runs the
+    /// shell's modal drag loop; winit buffers this app's events meanwhile.
+    fn drag_out(&mut self) {
+        let data = if let AppState::Capturing(ref mut o) = self.state {
+            o.commit_text();
+            o.flattened_selection()
+        } else {
+            None
+        };
+        let Some((pixels, w, h)) = data else {
+            self.report_export_preparation_failure("Drag failed");
+            return;
+        };
+        let result = snipping_tool_ul::drag_out::drag_image(&pixels, w, h);
+        drop(pixels);
+        if let Err(e) = result {
+            tracing::error!("Drag out failed: {e}");
+            self.editor_ui.header.status = e.clone();
+            if let AppState::Capturing(ref mut o) = self.state {
+                o.show_toast(e, 6000);
+            }
+        }
+        self.needs_redraw = true;
     }
 
     fn do_save(&mut self) {
@@ -1544,6 +1665,50 @@ impl App {
         }
     }
 
+    /// Finds emails, long numbers and keys with OCR and pixelates them as
+    /// one undo step. Shares the single OCR worker with Extract text.
+    fn do_redact(&mut self) {
+        let Some(operation) = self.ocr_flight.start() else {
+            return;
+        };
+        let data = if let AppState::Capturing(ref o) = self.state {
+            o.selection
+                .as_ref()
+                .map(|s| s.clamped(o.screenshot.width, o.screenshot.height))
+                .zip(o.raw_selection())
+        } else {
+            None
+        };
+        let Some((rect, (pixels, w, h))) = data else {
+            self.ocr_flight.finish(operation);
+            return;
+        };
+        let revision = self.image_revision;
+        let proxy = self.proxy.clone();
+        if let Some(worker) = self.ocr_worker.take() {
+            let _ = worker.join();
+        }
+        if let AppState::Capturing(ref mut o) = self.state {
+            o.show_toast("Looking for private info...".into(), 30000);
+        }
+        self.ocr_worker = Some(std::thread::spawn(move || {
+            let event = |result| UserEvent::RedactFinished {
+                operation,
+                revision,
+                origin: (rect.x, rect.y),
+                size: (w, h),
+                result,
+            };
+            let mut ready = ReadyGuard::new(
+                proxy,
+                event(Err("OCR stopped unexpectedly. Try again.".into())),
+            );
+            let result = snipping_tool_ul::ocr::find_words_owned(pixels, w, h)
+                .map(|words| snipping_tool_ul::redact::private_areas(&words));
+            ready.send(event(result));
+        }));
+    }
+
     fn do_pin(&mut self, event_loop: &ActiveEventLoop) {
         let mut created = false;
         if let AppState::Capturing(ref mut o) = self.state {
@@ -1723,6 +1888,8 @@ impl App {
             self.needs_redraw = false;
             return;
         };
+        self.editor_ui.header.copied =
+            overlay.clipboard_current(snipping_tool_ul::export::clipboard_sequence());
         self.editor_ui.draw_base(frame, dpi as f32);
         self.preview_renderer
             .draw(overlay, frame, &self.editor_view, dpi);
@@ -1991,6 +2158,13 @@ impl ReadyGuard {
             let _ = proxy.send_event(event);
         }
     }
+
+    /// An event sent ahead of the final one; the fallback stays armed.
+    fn send_extra(&self, event: UserEvent) {
+        if let Some(proxy) = &self.proxy {
+            let _ = proxy.send_event(event);
+        }
+    }
 }
 
 impl Drop for ReadyGuard {
@@ -2003,6 +2177,7 @@ impl Drop for ReadyGuard {
 
 impl ApplicationHandler<UserEvent> for App {
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        snipping_tool_ul::drag_out::remove_old_files(&std::env::temp_dir(), None);
         let deadline = Instant::now() + Duration::from_secs(15);
         snipping_tool_ul::ocr::cancel_pending();
         if let Some(worker) = self.ocr_worker.take() {
@@ -2037,6 +2212,64 @@ impl ApplicationHandler<UserEvent> for App {
                             close_on_success,
                         },
                     );
+                }
+            }
+            UserEvent::RedactFinished {
+                operation,
+                revision,
+                origin,
+                size,
+                result,
+            } => {
+                if !self.ocr_flight.finish(operation) || revision != self.image_revision {
+                    return;
+                }
+                let AppState::Capturing(ref mut o) = self.state else {
+                    return;
+                };
+                let message = match result {
+                    Ok(areas) if areas.is_empty() => {
+                        "No emails, long numbers or keys found".to_string()
+                    }
+                    Ok(areas) => {
+                        let block = o.pixelate_tool.block_size().max(10);
+                        let count = areas.len();
+                        o.add_annotations(
+                            areas
+                                .into_iter()
+                                .map(|a| a.padded(3., size.0 as f32, size.1 as f32))
+                                .filter(|a| a.w >= 1. && a.h >= 1.)
+                                .map(|a| snipping_tool_ul::tools::Annotation::Pixelate {
+                                    top_left: Point::new(
+                                        origin.0 as f32 + a.x,
+                                        origin.1 as f32 + a.y,
+                                    ),
+                                    size: snipping_tool_ul::geometry::Size::new(a.w, a.h),
+                                    block_size: block,
+                                })
+                                .collect(),
+                        );
+                        format!(
+                            "Hid {count} private detail{}. Check the image; Ctrl+Z undoes it.",
+                            if count == 1 { "" } else { "s" }
+                        )
+                    }
+                    Err(e) => format!("Hide private info failed: {e}"),
+                };
+                o.show_toast(message.clone(), 8000);
+                self.editor_ui.header.status = message;
+                self.needs_redraw = true;
+            }
+            UserEvent::Copied {
+                revision,
+                annotations,
+                sequence,
+            } => {
+                if revision == self.image_revision {
+                    if let AppState::Capturing(ref mut o) = self.state {
+                        o.clipboard_copy = Some((annotations, sequence));
+                        self.needs_redraw = true;
+                    }
                 }
             }
             UserEvent::ExportFinished {
@@ -2139,6 +2372,10 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     }
                     self.trigger_hotkey_capture(event_loop);
+                } else if event.state == global_hotkey::HotKeyState::Pressed
+                    && Some(event.id) == self.repeat_hotkey_id
+                {
+                    self.trigger_repeat_capture(event_loop);
                 }
             }
             UserEvent::ShowHome => self.show_home(event_loop),
@@ -2167,6 +2404,12 @@ impl ApplicationHandler<UserEvent> for App {
                 let restore_home = std::mem::take(&mut self.restore_home_on_cancel);
                 match result {
                     Ok(Some(snip)) => {
+                        self.last_region = Some(capture::ScreenRect {
+                            x: snip.screen.x_offset,
+                            y: snip.screen.y_offset,
+                            width: snip.screen.width,
+                            height: snip.screen.height,
+                        });
                         let copied = snip.clipboard_error.is_none();
                         if let Some(error) = snip.clipboard_error {
                             tracing::error!("Clipboard copy failed: {error}");
@@ -2212,7 +2455,9 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                             return;
                         }
-                        if let Err(error) = self.open_preview(event_loop, snip.screen, copied) {
+                        if let Err(error) =
+                            self.open_preview(event_loop, snip.screen, snip.clipboard_sequence)
+                        {
                             tracing::error!("Preview failed: {error}");
                             let _ = Notification::new()
                                 .summary("Snipping Tool UL")
@@ -4057,6 +4302,10 @@ impl ApplicationHandler<UserEvent> for App {
             {
                 tracing::info!("Global hotkey pressed — triggering capture");
                 self.trigger_hotkey_capture(event_loop);
+            } else if event.state == global_hotkey::HotKeyState::Pressed
+                && Some(event.id) == self.repeat_hotkey_id
+            {
+                self.trigger_repeat_capture(event_loop);
             }
         }
 

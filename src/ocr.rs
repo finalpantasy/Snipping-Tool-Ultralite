@@ -127,6 +127,33 @@ pub fn extract_text_owned(pixels: Vec<u8>, width: u32, height: u32) -> Result<St
     )
 }
 
+/// One recognized word and its box, in pixels of the image given to OCR.
+/// `line` numbers the word's text line, in reading order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Word {
+    pub text: String,
+    pub line: usize,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+/// Recognize words with their positions, through the same single native
+/// worker and time limit as text extraction.
+#[cfg(target_os = "windows")]
+pub fn find_words_owned(pixels: Vec<u8>, width: u32, height: u32) -> Result<Vec<Word>, String> {
+    request_any(
+        pixels,
+        width,
+        height,
+        Control::new(OCR_TIMEOUT),
+        &ACTIVE,
+        native::recognize_words,
+    )
+}
+
+/// Text requests; tests drive the worker through this.
 #[cfg(target_os = "windows")]
 fn request<F>(
     pixels: Vec<u8>,
@@ -138,6 +165,22 @@ fn request<F>(
 ) -> Result<String, String>
 where
     F: FnOnce(&[u8], u32, u32, &Control) -> Result<String, String> + Send + 'static,
+{
+    request_any(pixels, width, height, control, active, run)
+}
+
+#[cfg(target_os = "windows")]
+fn request_any<T, F>(
+    pixels: Vec<u8>,
+    width: u32,
+    height: u32,
+    control: Control,
+    active: &'static AtomicBool,
+    run: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&[u8], u32, u32, &Control) -> Result<T, String> + Send + 'static,
 {
     control.check()?;
     crate::export::validate_image(&pixels, width, height)?;
@@ -204,6 +247,10 @@ pub fn extract_text(_pixels: &[u8], _width: u32, _height: u32) -> Result<String,
 }
 #[cfg(not(target_os = "windows"))]
 pub fn extract_text_owned(_pixels: Vec<u8>, _width: u32, _height: u32) -> Result<String, String> {
+    Err("OCR is only available on Windows 10+".into())
+}
+#[cfg(not(target_os = "windows"))]
+pub fn find_words_owned(_pixels: Vec<u8>, _width: u32, _height: u32) -> Result<Vec<Word>, String> {
     Err("OCR is only available on Windows 10+".into())
 }
 

@@ -71,3 +71,35 @@ fn recorder_uses_physical_keys_so_shifted_digits_and_azerty_work() {
         None
     );
 }
+
+#[test]
+fn repeat_shortcut_adds_one_modifier_to_the_capture_shortcut() {
+    use snipping_tool_ul::hotkey::{parse_binding, repeat_binding};
+    assert_eq!(
+        repeat_binding("Ctrl+Shift+S").as_deref(),
+        Some("Ctrl+Shift+Alt+S")
+    );
+    assert_eq!(repeat_binding("ctrl+f9").as_deref(), Some("Ctrl+Alt+f9"));
+    // Alt+PrintScreen belongs to Windows; Shift is used instead.
+    assert_eq!(
+        repeat_binding("PrintScreen").as_deref(),
+        Some("Shift+PrintScreen")
+    );
+    assert_eq!(
+        repeat_binding("Ctrl+Alt+S").as_deref(),
+        Some("Ctrl+Shift+Alt+S")
+    );
+    assert_eq!(repeat_binding("Ctrl+Shift+Alt+S"), None);
+    assert_eq!(repeat_binding("nonsense"), None);
+    for capture in [
+        "Ctrl+Shift+S",
+        "ctrl+f9",
+        "PrintScreen",
+        "Ctrl+Alt+S",
+        "Win+1",
+    ] {
+        let repeat = repeat_binding(capture).unwrap();
+        assert!(parse_binding(&repeat).is_ok(), "{repeat}");
+        assert_ne!(parse_binding(&repeat), parse_binding(capture));
+    }
+}

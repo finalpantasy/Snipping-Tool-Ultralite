@@ -59,6 +59,10 @@ pub enum Action {
     ToggleColors,
     CustomColor,
     OpenUpdate,
+    /// Drag the image into another app as a PNG file.
+    DragOut,
+    /// Pixelate emails, long numbers and keys found by OCR.
+    Redact,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Menu {
@@ -104,6 +108,10 @@ pub struct Model {
     pub icons: RefCell<IconCache>,
     /// Version of a newer release found by the weekly check.
     pub update: Option<String>,
+    /// The clipboard still holds this editor's image exactly as shown.
+    pub copied: bool,
+    /// Shortcut that snips the previous area again, when registered.
+    pub repeat_hotkey: Option<String>,
 }
 impl Model {
     pub fn new(workflow: WorkflowConfig, hotkey: String) -> Self {
@@ -124,6 +132,8 @@ impl Model {
             keyboard_focus: false,
             icons: RefCell::new(IconCache::new()),
             update: None,
+            copied: false,
+            repeat_hotkey: None,
         }
     }
     /// The empty launcher is a command strip, not an unused image canvas.
@@ -438,11 +448,12 @@ impl Model {
             h(Action::ToggleDelay),
         );
         if editor {
+            // Copy stands out while the clipboard lacks the image as shown.
             c.button(
                 Rect::new(w - 309., 15., 82., 32.),
-                "Copy",
-                Some("copy"),
-                false,
+                if self.copied { "Copied" } else { "Copy" },
+                Some(if self.copied { "check" } else { "copy" }),
+                !self.copied,
                 h(Action::Button(22)),
                 true,
             );
@@ -472,18 +483,21 @@ impl Model {
             // Centre the gear on its 28-pixel target.
             c.icon("gear", w - 28., 22., 18., ui::muted());
         } else {
-            c.button(
-                Rect::new(w - 217., 15., 96., 32.),
-                self.upload_feedback.button_label(),
-                if self.upload_feedback.visible() {
-                    None
-                } else {
-                    Some("upload")
-                },
-                self.upload_feedback.visible(),
-                h(Action::Upload),
-                self.has_image,
-            );
+            // Before the first snip there is nothing to upload.
+            if self.has_image {
+                c.button(
+                    Rect::new(w - 217., 15., 96., 32.),
+                    self.upload_feedback.button_label(),
+                    if self.upload_feedback.visible() {
+                        None
+                    } else {
+                        Some("upload")
+                    },
+                    self.upload_feedback.visible(),
+                    h(Action::Upload),
+                    true,
+                );
+            }
             c.button(
                 Rect::new(w - 113., 15., 95., 32.),
                 "Options",
@@ -765,6 +779,7 @@ impl Model {
                 Action::ToggleDelay => "Wait before starting a capture",
                 Action::Upload => "Upload publicly and copy a share link",
                 Action::ToggleOptions => "Capture preferences, sharing, and settings",
+                Action::Button(22) if self.copied => "The clipboard has this image as shown",
                 Action::Button(22) => "Copy image with annotations (Ctrl+C)",
                 Action::Button(23) => "Save image with annotations (Ctrl+S)",
                 _ => return,
@@ -816,7 +831,10 @@ impl Model {
                 true,
             );
         } else if self.menu == Menu::None {
-            let shortcut = format!("Shortcut  {}", self.hotkey);
+            let shortcut = match &self.repeat_hotkey {
+                Some(repeat) => format!("Shortcut  {}   Same area  {repeat}", self.hotkey),
+                None => format!("Shortcut  {}", self.hotkey),
+            };
             c.label(20., 77., &shortcut, 12., ui::ink());
             let label = if self.status.is_empty() {
                 if self.workflow.open_preview {

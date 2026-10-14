@@ -69,9 +69,40 @@ pub struct OverlayState {
     pub toast_until: Option<std::time::Instant>,
     /// Visible toolbar button indices (original 0-23 indices), computed from ToolbarConfig.
     pub visible_buttons: Vec<usize>,
+    /// The annotations last copied and the clipboard sequence number that
+    /// copy produced. Another app's copy or a later edit makes it stale.
+    pub clipboard_copy: Option<(Vec<Annotation>, u32)>,
 }
 
 impl OverlayState {
+    /// Adds several annotations as one undo step.
+    pub fn add_annotations(&mut self, added: Vec<Annotation>) {
+        if added.is_empty() {
+            return;
+        }
+        let first = self.annotations.len();
+        self.annotations.extend(added);
+        // Highest index first, so undo removes them without shifting the rest.
+        let adds = (first..self.annotations.len())
+            .rev()
+            .map(UndoAction::Add)
+            .collect();
+        crate::tools::record_undo(
+            &mut self.undo_stack,
+            &mut self.redo_stack,
+            UndoAction::Batch(adds),
+        );
+    }
+
+    /// Whether the clipboard still holds this image exactly as shown, given
+    /// the clipboard's current sequence number. Unfinished text counts as a change.
+    pub fn clipboard_current(&self, sequence: u32) -> bool {
+        !(self.text_input_active && !self.text_input_buffer.is_empty())
+            && self
+                .clipboard_copy
+                .as_ref()
+                .is_some_and(|(copied, s)| *s == sequence && *copied == self.annotations)
+    }
     /// Selects the topmost annotation under `pos` for the right-click menu.
     /// Pending text is committed first: a text re-edit removes its annotation
     /// from the list, so indices found before the commit would go stale.
@@ -187,6 +218,7 @@ impl OverlayState {
             icon_cache: IconCache::new(),
             eyedropper_preview: None,
             toast_message: None,
+            clipboard_copy: None,
             toast_until: None,
             visible_buttons: config.toolbar.visible_button_indices(),
         }

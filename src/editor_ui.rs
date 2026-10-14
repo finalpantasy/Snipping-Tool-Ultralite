@@ -9,6 +9,8 @@ use crate::{
 pub const MIN_WIDTH: u32 = 660;
 pub const MIN_HEIGHT: u32 = 390;
 pub const PRIMARY: [usize; 7] = [6, 7, 9, 1, 2, 10, 0];
+/// Tools-menu slot for "Hide private info", which has no toolbar button.
+const REDACT: usize = usize::MAX;
 fn tool_label(i: usize) -> &'static str {
     match i {
         0 => "Select",
@@ -245,7 +247,11 @@ impl EditorUi {
                 })
                 .collect();
             let annotations: Vec<_> = items.iter().copied().filter(|i| *i < 14).collect();
-            let actions: Vec<_> = items.iter().copied().filter(|i| *i >= 19).collect();
+            let mut actions: Vec<_> = items.iter().copied().filter(|i| *i >= 19).collect();
+            // Uses the same OCR, so it is offered wherever Extract text is.
+            if actions.contains(&19) {
+                actions.insert(1, REDACT);
+            }
             let rows = annotations.len().div_ceil(2) + actions.len().div_ceil(2);
             let mut y = (ty - rows as f32 * 32. - 58.).max(55.);
             let mut targets = Vec::new();
@@ -260,7 +266,11 @@ impl EditorUi {
                         y + (n / 2) as f32 * 32.,
                         180.,
                         32.,
-                        Action::Button(*i),
+                        if *i == REDACT {
+                            Action::Redact
+                        } else {
+                            Action::Button(*i)
+                        },
                     ));
                 }
                 y += group.len().div_ceil(2) as f32 * 32.;
@@ -309,6 +319,8 @@ impl EditorUi {
                 ));
             }
         }
+        // The size label doubles as the drag handle.
+        t.push(Target::new(w - 116., h - 33., 104., 28., Action::DragOut));
         t.extend([
             Target::new(tx + 442., ty + 7., 48., 46., Action::ToggleColors),
             Target::new(tx + 498., ty + 7., 48., 46., Action::ToggleTools),
@@ -388,15 +400,9 @@ impl EditorUi {
             cache.restore(p.data_mut(), stride);
             return;
         }
+        // No inner well: the image sits directly on the frost, edged by the
+        // preview renderer, so the workspace has two layers instead of three.
         ui::glass_fill(p);
-        let (w, h) = (p.width() as f32 / dpi, p.height() as f32 / dpi);
-        let mut icons = self.header.icons.borrow_mut();
-        let mut c = Canvas {
-            pixmap: p,
-            scale: dpi,
-            icons: &mut icons,
-        };
-        c.round(Self::canvas_rect(w, h), 8., crate::theme::bg_0(), 0.20);
         *cached = Some(BaseCache::new(key, p.data(), stride));
     }
 
@@ -442,16 +448,6 @@ impl EditorUi {
         } else {
             state.size_kind().label()
         };
-        c.centered_in(
-            Rect::new(18., cy - 19., w - 36., 16.),
-            if state.active_tool == crate::tools::ToolKind::Select {
-                "Middle-drag to pan · Scroll to zoom · Space to fit"
-            } else {
-                "Middle-drag to pan · Scroll to zoom"
-            },
-            10.,
-            ui::muted(),
-        );
         if state.size_kind() == crate::editing::SizeKind::None {
             c.centered_in(Rect::new(18., cy, w - 36., 30.), label, 12., ui::muted());
         } else {
@@ -609,19 +605,23 @@ impl EditorUi {
             .toast_message
             .as_deref()
             .unwrap_or(&self.header.status);
+        // A copy message must not outlive the copy it describes.
+        let stale = !self.header.copied && status.starts_with("Copied");
+        let status = if stale {
+            "Not on the clipboard yet: press Ctrl+C"
+        } else {
+            status
+        };
         let failed = status.contains("failed");
         if !status.trim().is_empty() {
-            c.icon(
-                if failed { "more" } else { "check" },
-                22.,
-                h - 23.,
-                12.,
-                if failed {
-                    (232, 162, 147)
-                } else {
-                    (154, 200, 172)
-                },
-            );
+            let (icon, color) = if failed {
+                ("more", (232, 162, 147))
+            } else if stale {
+                ("copy", ui::muted())
+            } else {
+                ("check", (154, 200, 172))
+            };
+            c.icon(icon, 22., h - 23., 12., color);
             c.label(
                 42.,
                 h - 25.,
@@ -633,10 +633,36 @@ impl EditorUi {
                 ui::muted(),
             );
         }
+        // The status row holds navigation help and the size, so the
+        // workspace above keeps a single hint line.
         let bounds = state.editor_canvas_bounds();
         let size = format!("{:.0} x {:.0}", bounds.width, bounds.height);
         let tw = ui::measure(&size, 11. * dpi) / dpi;
+        if self.header.hovered == Some(Action::DragOut) {
+            c.round(
+                Rect::new(w - 42. - tw, h - 31., tw + 30., 24.),
+                6.,
+                ui::muted(),
+                0.12,
+            );
+        }
+        c.icon("grip", w - 38. - tw, h - 25., 12., ui::muted());
         c.label(w - 22. - tw, h - 25., &size, 11., ui::muted());
+        let help = if state.active_tool == crate::tools::ToolKind::Select {
+            "Scroll to zoom · Middle-drag to pan · Space to fit"
+        } else {
+            "Scroll to zoom · Middle-drag to pan"
+        };
+        let hw = ui::measure(help, 10.5 * dpi) / dpi;
+        let status_w = if status.trim().is_empty() {
+            0.
+        } else {
+            42. + ui::measure(status, 11. * dpi) / dpi
+        };
+        // Drop the help rather than let it collide with a long status.
+        if w - 22. - tw - 40. - hw > status_w + 24. {
+            c.label(w - 22. - tw - 40. - hw, h - 24.5, help, 10.5, ui::muted());
+        }
         if self.header.menu == Menu::Annotation {
             let targets = self.targets(w, h, state);
             let first = targets[0].rect;
@@ -725,6 +751,15 @@ impl EditorUi {
                                 ui::ink(),
                             );
                         }
+                    } else if t.action == Action::Redact {
+                        c.icon("pixelate", t.rect.x + 10., t.rect.y + 8., 16., ui::muted());
+                        c.label(
+                            t.rect.x + 36.,
+                            t.rect.y + 7.,
+                            "Hide private info",
+                            12.,
+                            ui::ink(),
+                        );
                     } else if t.action == Action::CustomColor {
                         c.label(
                             t.rect.x + 10.,
@@ -757,6 +792,10 @@ impl EditorUi {
                         Action::ToggleColors => "Choose the annotation color",
                         Action::ToggleTools => "More annotations, extract text, and pin",
                         Action::ResetZoom => "Reset zoom to fit the window (Ctrl+0)",
+                        Action::DragOut => "Drag into another app to drop the image as a file",
+                        Action::Redact => {
+                            "Pixelate emails, long numbers and keys found in the image"
+                        }
                         _ => "",
                     };
                     if !label.is_empty() {

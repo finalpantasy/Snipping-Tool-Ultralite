@@ -392,15 +392,30 @@ pub fn copy_with_ticket(
     width: u32,
     height: u32,
 ) -> Result<bool, String> {
+    copy_with_ticket_sequence(ticket, pixels, width, height).map(|s| s.is_some())
+}
+
+/// Like `copy_with_ticket`, but also returns the clipboard sequence number
+/// the copy produced, read while the clipboard writer is still held.
+/// `Ok(None)` means a newer request was kept.
+pub fn copy_with_ticket_sequence(
+    ticket: u64,
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<Option<u32>, String> {
     validate_image(pixels, width, height)?;
+    let mut sequence = 0;
     // Windows: PNG and DIBV5 are built before the clipboard opens, then
     // published with bounded busy retries.
     #[cfg(windows)]
-    return crate::clipboard_queue::run(ticket, || {
-        crate::clipboard_image::write(pixels, width, height)
-    });
+    let copied = crate::clipboard_queue::run(ticket, || {
+        crate::clipboard_image::write(pixels, width, height)?;
+        sequence = clipboard_sequence();
+        Ok(())
+    })?;
     #[cfg(not(windows))]
-    crate::clipboard_queue::run(ticket, || {
+    let copied = crate::clipboard_queue::run(ticket, || {
         use arboard::{Clipboard, ImageData};
 
         let mut clipboard =
@@ -413,7 +428,16 @@ pub fn copy_with_ticket(
         clipboard
             .set_image(img)
             .map_err(|e| format!("Failed to copy image to clipboard: {e}"))
-    })
+    })?;
+    Ok(copied.then_some(sequence))
+}
+
+/// The clipboard's change counter. It moves whenever any app copies.
+pub fn clipboard_sequence() -> u32 {
+    #[cfg(windows)]
+    return unsafe { windows::Win32::System::DataExchange::GetClipboardSequenceNumber() };
+    #[cfg(not(windows))]
+    0
 }
 
 /// Save pixel data to an image file (accepts owned Vec to avoid redundant copy).

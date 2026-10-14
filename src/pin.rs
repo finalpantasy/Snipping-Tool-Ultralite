@@ -1,8 +1,9 @@
 //! Pinned always-on-top capture windows.
 //!
 //! A pin shows a captured selection in a borderless floating window framed by
-//! a themed border. Drag to move, middle-click to copy, right-click to
-//! reveal the backing temp file, Escape or close to dismiss.
+//! a themed border. Drag to move, Ctrl+drag to drop the image into another
+//! app, middle-click to copy, right-click to reveal the backing temp file,
+//! Escape or close to dismiss.
 
 use std::num::NonZeroU32;
 use std::path::PathBuf;
@@ -46,6 +47,7 @@ pub struct PinnedWindow {
     dragging: bool,
     drag_start: Option<winit::dpi::PhysicalPosition<f64>>,
     temp_path: Option<Arc<TempImage>>,
+    ctrl: bool,
 }
 
 impl PinnedWindow {
@@ -209,6 +211,7 @@ impl PinnedWindow {
             dragging: false,
             drag_start: None,
             temp_path,
+            ctrl: false,
         };
         if let Err(error) = pin.render() {
             tracing::error!("Failed to present pin: {error}");
@@ -252,6 +255,21 @@ impl PinnedWindow {
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 if let Key::Named(NamedKey::Escape) = &event.logical_key {
                     return true;
+                }
+            }
+
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.ctrl = modifiers.state().control_key();
+            }
+
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } if self.ctrl => {
+                let (pixels, w, h) = self.image_pixels();
+                if let Err(e) = crate::drag_out::drag_image(&pixels, w, h) {
+                    tracing::error!("Pin drag out failed: {e}");
                 }
             }
 

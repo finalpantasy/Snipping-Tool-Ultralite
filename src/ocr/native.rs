@@ -1,15 +1,26 @@
-use super::{text_result, Control, Stop};
+use super::{text_result, Control, Stop, Word};
 use windows::{
     core::Interface,
     Foundation::AsyncStatus,
     Graphics::Imaging::{BitmapBufferAccessMode, BitmapPixelFormat, SoftwareBitmap},
-    Media::Ocr::OcrEngine,
+    Media::Ocr::{OcrEngine, OcrResult},
     Win32::System::WinRT::{
         IMemoryBufferByteAccess, RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED,
     },
 };
 
 struct Apartment;
+impl Apartment {
+    fn enter(control: &Control) -> Result<Self, String> {
+        control.check()?;
+        unsafe {
+            RoInitialize(RO_INIT_MULTITHREADED).map_err(win_error)?;
+        }
+        let apartment = Apartment;
+        control.check()?;
+        Ok(apartment)
+    }
+}
 impl Drop for Apartment {
     fn drop(&mut self) {
         unsafe {
@@ -40,12 +51,40 @@ pub(super) fn recognize(
     height: u32,
     control: &Control,
 ) -> Result<String, String> {
-    control.check()?;
-    unsafe {
-        RoInitialize(RO_INIT_MULTITHREADED).map_err(win_error)?;
+    let _apartment = Apartment::enter(control)?;
+    let result = run(pixels, width, height, control)?;
+    text_result(result.Text().map_err(win_error)?.as_wide())
+}
+
+pub(super) fn recognize_words(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    control: &Control,
+) -> Result<Vec<Word>, String> {
+    let _apartment = Apartment::enter(control)?;
+    let result = run(pixels, width, height, control)?;
+    let mut words = Vec::new();
+    for (line, ocr_line) in result.Lines().map_err(win_error)?.into_iter().enumerate() {
+        control.check()?;
+        for word in ocr_line.Words().map_err(win_error)? {
+            let rect = word.BoundingRect().map_err(win_error)?;
+            words.push(Word {
+                text: word.Text().map_err(win_error)?.to_string_lossy(),
+                line,
+                x: rect.X,
+                y: rect.Y,
+                w: rect.Width,
+                h: rect.Height,
+            });
+        }
     }
-    let _apartment = Apartment;
-    control.check()?;
+    Ok(words)
+}
+
+/// Runs recognition inside the caller's apartment, which must outlive the
+/// returned result.
+fn run(pixels: &[u8], width: u32, height: u32, control: &Control) -> Result<OcrResult, String> {
     let max = OcrEngine::MaxImageDimension().map_err(win_error)?;
     if width > max || height > max {
         return Err(format!("Selected image exceeds Windows OCR's {max}-pixel dimension limit; select a smaller region"));
@@ -119,12 +158,7 @@ pub(super) fn recognize(
     );
     bitmap.can_close = true;
     terminal?;
-    let value = operation
-        .GetResults()
-        .map_err(win_error)?
-        .Text()
-        .map_err(win_error)?;
-    text_result(value.as_wide())
+    operation.GetResults().map_err(win_error)
 }
 
 pub(super) fn wait_for_terminal(

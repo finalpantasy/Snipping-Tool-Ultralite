@@ -5,10 +5,14 @@ use crate::capture::{BgraSnapshot, ScreenRect};
 use windows::core::w;
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, ClientToScreen, CombineRgn, CreateRectRgn, DeleteObject, EndPaint, GetStockObject,
-    SetWindowRgn, UpdateWindow, BLACK_BRUSH, HBRUSH, HRGN, PAINTSTRUCT, RGN_DIFF, WHITE_BRUSH,
+    BeginPaint, ClientToScreen, CombineRgn, CreateFontW, CreateRectRgn, CreateSolidBrush,
+    DeleteObject, DrawTextW, EndPaint, FillRect, GetDC, GetStockObject, GetTextExtentPoint32W,
+    InvalidateRect, ReleaseDC, SelectObject, SetBkMode, SetTextColor, SetWindowRgn, UpdateWindow,
+    BLACK_BRUSH, CLEARTYPE_QUALITY, DEFAULT_CHARSET, DT_CENTER, DT_SINGLELINE, DT_VCENTER,
+    FW_SEMIBOLD, HBRUSH, HDC, HFONT, HRGN, PAINTSTRUCT, RGN_DIFF, TRANSPARENT, WHITE_BRUSH,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -63,6 +67,8 @@ struct Picker {
     selected: Option<ScreenRect>,
     done: bool,
     border: HWND,
+    /// Shows the selection's exact size in pixels; may be null.
+    readout: HWND,
     windows: *const crate::window_detect::WinRect,
     windows_len: usize,
     window_mode: bool,
@@ -144,6 +150,7 @@ unsafe fn cursor(hwnd: HWND, lp: LPARAM) -> Option<(i32, i32)> {
 unsafe fn update_selection(hwnd: HWND, state: &Picker, end: (i32, i32)) {
     let Some(rect) = state.selection_at(Some(end)) else {
         let _ = ShowWindow(state.border, SW_HIDE);
+        let _ = ShowWindow(state.readout, SW_HIDE);
         if !state.window_mode {
             // Remove the old cutout when a drag collapses or moves offscreen.
             // A null region restores the full rectangular dim veil.
@@ -186,6 +193,136 @@ unsafe fn update_selection(hwnd: HWND, state: &Picker, end: (i32, i32)) {
         height,
         SWP_NOACTIVATE | SWP_SHOWWINDOW,
     );
+    show_readout(state.readout, rect, state.bounds);
+}
+
+/// The readout's font at the window's current DPI: 9 pt Segoe UI.
+unsafe fn readout_font(hwnd: HWND) -> HFONT {
+    let dpi = GetDpiForWindow(hwnd).max(96) as i32;
+    CreateFontW(
+        -(9 * dpi / 72),
+        0,
+        0,
+        0,
+        FW_SEMIBOLD.0 as i32,
+        0,
+        0,
+        0,
+        DEFAULT_CHARSET.0 as u32,
+        0,
+        0,
+        CLEARTYPE_QUALITY.0 as u32,
+        0,
+        w!("Segoe UI"),
+    )
+}
+
+/// Width by height of the selection: the exact size the snip will have.
+fn readout_text(rect: ScreenRect) -> Vec<u16> {
+    format!("{} × {}", rect.width, rect.height)
+        .encode_utf16()
+        .collect()
+}
+
+/// Below the selection's right edge, else above it, else inside its
+/// bottom-right corner; always kept within the captured desktop.
+fn readout_position(
+    rect: ScreenRect,
+    bounds: ScreenRect,
+    size: (i32, i32),
+    gap: i32,
+) -> (i32, i32) {
+    let (w, h) = size;
+    let right = bounds.x + bounds.width as i32;
+    let bottom = bounds.y + bounds.height as i32;
+    let rect_bottom = rect.y + rect.height as i32;
+    let x = (rect.x + rect.width as i32 - w)
+        .min(right - w)
+        .max(bounds.x);
+    let y = if rect_bottom + gap + h <= bottom {
+        rect_bottom + gap
+    } else if rect.y - gap - h >= bounds.y {
+        rect.y - gap - h
+    } else {
+        rect_bottom - gap - h
+    };
+    (x, y.min(bottom - h).max(bounds.y))
+}
+
+unsafe fn show_readout(readout: HWND, rect: ScreenRect, bounds: ScreenRect) {
+    if readout.is_invalid() {
+        return;
+    }
+    let mut text = readout_text(rect);
+    let dc = GetDC(readout);
+    if dc.is_invalid() {
+        return;
+    }
+    let font = readout_font(readout);
+    let old = SelectObject(dc, font);
+    let mut extent = windows::Win32::Foundation::SIZE::default();
+    let measured = GetTextExtentPoint32W(dc, &text, &mut extent).as_bool();
+    SelectObject(dc, old);
+    let _ = DeleteObject(font);
+    ReleaseDC(readout, dc);
+    if !measured {
+        return;
+    }
+    let pad = extent.cy / 2;
+    let size = (extent.cx + pad * 2, extent.cy + pad);
+    let (x, y) = readout_position(rect, bounds, size, pad / 2 + 2);
+    text.push(0);
+    let _ = SetWindowTextW(readout, windows::core::PCWSTR(text.as_ptr()));
+    let _ = SetWindowPos(
+        readout,
+        HWND_TOPMOST,
+        x,
+        y,
+        size.0,
+        size.1,
+        SWP_NOACTIVATE | SWP_SHOWWINDOW,
+    );
+    let _ = InvalidateRect(readout, None, false);
+}
+
+unsafe fn paint_readout(hwnd: HWND, dc: HDC) {
+    let mut client = windows::Win32::Foundation::RECT::default();
+    let _ = GetClientRect(hwnd, &mut client);
+    let background = CreateSolidBrush(COLORREF(0x0024_2220));
+    FillRect(dc, &client, background);
+    let _ = DeleteObject(background);
+    let mut text = [0u16; 32];
+    let len = GetWindowTextW(hwnd, &mut text).max(0) as usize;
+    let font = readout_font(hwnd);
+    let old = SelectObject(dc, font);
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, COLORREF(0x00FF_FFFF));
+    DrawTextW(
+        dc,
+        &mut text[..len],
+        &mut client,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+    );
+    SelectObject(dc, old);
+    let _ = DeleteObject(font);
+}
+
+unsafe extern "system" fn readout_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    match msg {
+        WM_ERASEBKGND => LRESULT(1),
+        // Never take the pointer from the selection beneath.
+        WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
+        WM_PAINT => {
+            let mut paint = PAINTSTRUCT::default();
+            let dc = BeginPaint(hwnd, &mut paint);
+            if !dc.is_invalid() {
+                paint_readout(hwnd, dc);
+            }
+            let _ = EndPaint(hwnd, &paint);
+            LRESULT(0)
+        }
+        _ => DefWindowProcW(hwnd, msg, wp, lp),
+    }
 }
 
 unsafe extern "system" fn picker_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -290,6 +427,12 @@ fn select(
             hbrBackground: HBRUSH(GetStockObject(WHITE_BRUSH).0),
             ..Default::default()
         };
+        let readout_class = WNDCLASSW {
+            hInstance: instance,
+            lpszClassName: w!("SnippingToolUL.Readout"),
+            lpfnWndProc: Some(readout_proc),
+            ..Default::default()
+        };
         let frozen_class = WNDCLASSW {
             hInstance: instance,
             lpszClassName: w!("SnippingToolUL.FrozenScreen"),
@@ -304,6 +447,12 @@ fn select(
             return Err(windows::core::Error::from_win32().to_string());
         }
         if RegisterClassW(&border_class) == 0
+            && windows::Win32::Foundation::GetLastError()
+                != windows::Win32::Foundation::ERROR_CLASS_ALREADY_EXISTS
+        {
+            return Err(windows::core::Error::from_win32().to_string());
+        }
+        if RegisterClassW(&readout_class) == 0
             && windows::Win32::Foundation::GetLastError()
                 != windows::Win32::Foundation::ERROR_CLASS_ALREADY_EXISTS
         {
@@ -354,12 +503,29 @@ fn select(
             None,
         )
         .map_err(|e| e.to_string())?;
+        // Optional: the picker still works without its size label.
+        let readout = CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+            readout_class.lpszClassName,
+            w!("Snipping Tool UL selection size"),
+            WS_POPUP,
+            0,
+            0,
+            1,
+            1,
+            None,
+            None,
+            instance,
+            None,
+        )
+        .unwrap_or_default();
         let mut state = Picker {
             bounds,
             start: None,
             selected: None,
             done: false,
             border,
+            readout,
             windows: windows.as_ptr(),
             windows_len: windows.len(),
             window_mode,
@@ -381,12 +547,14 @@ fn select(
             Ok(hwnd) => hwnd,
             Err(e) => {
                 let _ = DestroyWindow(border);
+                let _ = DestroyWindow(readout);
                 return Err(e.to_string());
             }
         };
         if let Err(e) = SetLayeredWindowAttributes(veil, COLORREF(0), 70, LWA_ALPHA) {
             let _ = DestroyWindow(veil);
             let _ = DestroyWindow(border);
+            let _ = DestroyWindow(readout);
             return Err(e.to_string());
         }
         surface.veil = veil;
@@ -395,6 +563,7 @@ fn select(
         if surface.paint_failed {
             let _ = DestroyWindow(veil);
             let _ = DestroyWindow(border);
+            let _ = DestroyWindow(readout);
             return Err("Could not display the frozen screen".into());
         }
         let _ = ShowWindow(veil, SW_SHOW);
@@ -420,9 +589,11 @@ fn select(
             DispatchMessageW(&message);
         }
         let _ = ShowWindow(border, SW_HIDE);
+        let _ = ShowWindow(readout, SW_HIDE);
         let _ = ShowWindow(veil, SW_HIDE);
         let _ = ShowWindow(frozen.0, SW_HIDE);
         let _ = DestroyWindow(border);
+        let _ = DestroyWindow(readout);
         let _ = DestroyWindow(veil);
         drop(frozen);
         if surface.paint_failed {
@@ -694,6 +865,7 @@ mod tests {
             selected: None,
             done: false,
             border: HWND::default(),
+            readout: HWND::default(),
             windows: std::ptr::null(),
             windows_len: 0,
             window_mode: false,
@@ -702,6 +874,41 @@ mod tests {
 
     fn rect_tuple(rect: Option<ScreenRect>) -> Option<(i32, i32, u32, u32)> {
         rect.map(|r| (r.x, r.y, r.width, r.height))
+    }
+
+    #[test]
+    fn size_readout_shows_exact_pixels_and_stays_on_the_desktop() {
+        let r = |x, y, width, height| ScreenRect {
+            x,
+            y,
+            width,
+            height,
+        };
+        assert_eq!(
+            String::from_utf16(&readout_text(r(5, 5, 1920, 1080))).unwrap(),
+            "1920 \u{d7} 1080"
+        );
+        let bounds = r(-100, -50, 300, 200);
+        // Below the right edge when there is room.
+        assert_eq!(
+            readout_position(r(0, 0, 100, 50), bounds, (60, 20), 4),
+            (40, 54)
+        );
+        // Above when the selection reaches the bottom.
+        assert_eq!(
+            readout_position(r(0, 100, 100, 50), bounds, (60, 20), 4),
+            (40, 76)
+        );
+        // Inside the corner when the selection fills the height.
+        assert_eq!(
+            readout_position(r(-100, -50, 300, 200), bounds, (60, 20), 4),
+            (140, 126)
+        );
+        // Narrow selections at the left edge keep the label on screen.
+        assert_eq!(
+            readout_position(r(-100, 0, 10, 10), bounds, (60, 20), 4),
+            (-100, 14)
+        );
     }
 
     fn packed(x: i32, y: i32) -> u32 {
@@ -827,6 +1034,7 @@ mod tests {
             selected: None,
             done: false,
             border: HWND::default(),
+            readout: HWND::default(),
             windows: std::ptr::null(),
             windows_len: 0,
             window_mode: false,

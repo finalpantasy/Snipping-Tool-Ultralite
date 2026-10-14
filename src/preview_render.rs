@@ -513,6 +513,22 @@ impl PreviewRenderer {
             return;
         }
         let (w, h) = (x1 - x0, y1 - y0);
+        draw_edge(
+            frame,
+            (
+                (left - 0.5).ceil(),
+                (top - 0.5).ceil(),
+                (left + bounds.width as f64 * l.scale - 0.5).ceil(),
+                (top + bounds.height as f64 * l.scale - 0.5).ceil(),
+            ),
+            (
+                well.x as f64 * dpi,
+                well.y as f64 * dpi,
+                (well.x + well.w) as f64 * dpi,
+                (well.y + well.h) as f64 * dpi,
+            ),
+            dpi,
+        );
         let relative_x = l.x - x0 as f64;
         let relative_y = l.y - y0 as f64;
         let ox = relative_x as f32;
@@ -1089,6 +1105,53 @@ mod speed_tests {
             });
             assert_eq!(cache.bytes, 0);
             println!("4K pixelation fallback at {scale}x into 1280x720: previous={old:.4}ms optimized={new:.4}ms ratio={:.2}x", old/new);
+        }
+    }
+}
+
+/// A hairline and a short soft shadow just outside the canvas, so a white
+/// snip keeps a visible edge on pale frost. Only rings outside `canvas` are
+/// painted (the canvas covers the rest), clipped to the workspace `clip`.
+/// Both rectangles are (left, top, right, bottom) in device pixels.
+fn draw_edge(
+    frame: &mut Pixmap,
+    canvas: (f64, f64, f64, f64),
+    clip: (f64, f64, f64, f64),
+    dpi: f64,
+) {
+    let dark = crate::theme::mode() == crate::theme::ThemeMode::Dark;
+    let (l, t, r, b) = canvas;
+    let reach = (6. * dpi).round().max(1.) as i32;
+    for d in 1..=reach {
+        let (rgb, alpha) = if d == 1 {
+            if dark {
+                (255, 0.14)
+            } else {
+                (0, 0.16)
+            }
+        } else {
+            let fade = 1. - (d - 1) as f32 / reach as f32;
+            (0, (if dark { 0.16 } else { 0.07 }) * fade * fade)
+        };
+        let mut paint = tiny_skia::Paint::default();
+        paint.set_color_rgba8(rgb, rgb, rgb, (alpha * 255.).round() as u8);
+        let d = d as f64;
+        // One ring: top and bottom rows, then the columns between them.
+        for (x, y, w, h) in [
+            (l - d, t - d, r - l + 2. * d, 1.),
+            (l - d, b + d - 1., r - l + 2. * d, 1.),
+            (l - d, t - d + 1., 1., b - t + 2. * d - 2.),
+            (r + d - 1., t - d + 1., 1., b - t + 2. * d - 2.),
+        ] {
+            let x0 = x.max(clip.0).max(0.);
+            let y0 = y.max(clip.1).max(0.);
+            let x1 = (x + w).min(clip.2).min(frame.width() as f64);
+            let y1 = (y + h).min(clip.3).min(frame.height() as f64);
+            if let Some(rect) =
+                tiny_skia::Rect::from_ltrb(x0 as f32, y0 as f32, x1 as f32, y1 as f32)
+            {
+                frame.fill_rect(rect, &paint, tiny_skia::Transform::identity(), None);
+            }
         }
     }
 }

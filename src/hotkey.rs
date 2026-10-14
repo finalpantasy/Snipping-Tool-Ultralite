@@ -110,6 +110,39 @@ pub fn parse_binding(binding: &str) -> Result<(Modifiers, Code), String> {
     Ok((modifiers, code))
 }
 
+/// The shortcut that snips the previous area again, derived from the capture
+/// shortcut so there is nothing extra to set up: Alt is added (Ctrl+Shift+S
+/// becomes Ctrl+Shift+Alt+S). A bare PrintScreen gets Shift instead, because
+/// Alt+PrintScreen is Windows' own window screenshot. `None` when the capture
+/// shortcut already uses Alt and Shift.
+pub fn repeat_binding(capture: &str) -> Option<String> {
+    let (mods, code) = parse_binding(capture).ok()?;
+    let mut mods = mods;
+    if code == Code::PrintScreen && mods.is_empty() {
+        mods |= Modifiers::SHIFT;
+    } else if !mods.contains(Modifiers::ALT) {
+        mods |= Modifiers::ALT;
+    } else if !mods.contains(Modifiers::SHIFT) {
+        mods |= Modifiers::SHIFT;
+    } else {
+        return None;
+    }
+    let key = capture.rsplit('+').next()?.trim();
+    let mut parts: Vec<&str> = Vec::new();
+    for (flag, label) in [
+        (Modifiers::CONTROL, "Ctrl"),
+        (Modifiers::SHIFT, "Shift"),
+        (Modifiers::ALT, "Alt"),
+        (Modifiers::SUPER, "Super"),
+    ] {
+        if mods.contains(flag) {
+            parts.push(label);
+        }
+    }
+    parts.push(key);
+    Some(parts.join("+"))
+}
+
 /// Register a global hotkey from a binding string like "Ctrl+Shift+S".
 ///
 /// Returns the manager (must be kept alive) and the hotkey id.

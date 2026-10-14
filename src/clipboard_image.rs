@@ -177,6 +177,19 @@ mod win {
     /// Publish PNG first (some apps take the first format they recognise),
     /// then CF_DIBV5 for apps that only read bitmaps.
     pub fn write(pixels: &[u8], width: u32, height: u32) -> Result<(), String> {
+        // EXPERIMENT, remove before release: the upper bound of what delayed
+        // PNG rendering could save, measured by the nightly A/B run.
+        if std::env::var_os("SNIPPING_TOOL_UL_EXPERIMENT_DIB_ONLY").is_some() {
+            let dib_len = super::dibv5_len(width, height)
+                .ok_or("Image is too large for the Windows clipboard")?;
+            let dib = GlobalBuffer::filled(dib_len, |dst| {
+                super::write_dibv5(dst, pixels, width, height)
+            })?;
+            let _clipboard = OpenedClipboard::open()?;
+            unsafe { EmptyClipboard() }
+                .map_err(|e| format!("Failed to empty the clipboard: {e}"))?;
+            return dib.publish(CF_DIBV5);
+        }
         let payload = prepare(pixels, width, height)?;
         let png_format = unsafe { RegisterClipboardFormatW(w!("PNG")) };
         if png_format == 0 {

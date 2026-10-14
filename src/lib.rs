@@ -9,6 +9,7 @@ pub mod clipboard_queue;
 pub mod color_picker;
 pub mod config;
 pub mod countdown;
+pub mod drag_out;
 pub mod editing;
 pub mod editor_ui;
 pub mod export;
@@ -29,6 +30,7 @@ pub mod overlay;
 pub mod pin;
 pub mod preview;
 pub mod preview_render;
+pub mod redact;
 #[cfg(target_os = "windows")]
 pub mod region_picker;
 pub mod renderer;
