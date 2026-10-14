@@ -49,6 +49,8 @@ struct SnipResult {
 
 enum UserEvent {
     IntegrationReady(Result<String, String>),
+    /// The weekly update check finished; Some when a newer release exists.
+    UpdateChecked(Option<snipping_tool_ul::update_check::Release>),
     ShowHome,
     Hotkey(global_hotkey::GlobalHotKeyEvent),
     Tray(TrayIconEvent),
@@ -88,6 +90,8 @@ enum UserEvent {
 }
 
 struct App {
+    /// A newer release found by the weekly check, offered as a link.
+    update: Option<snipping_tool_ul::update_check::Release>,
     pending_menu: Vec<MenuEvent>,
     pending_tray: Vec<TrayIconEvent>,
     launcher: Option<LauncherWindow>,
@@ -174,6 +178,7 @@ impl App {
         snipping_tool_ul::theme::set_mode(config.theme_mode());
         let editor_ui = snipping_tool_ul::editor_ui::EditorUi::new(&config);
         Self {
+            update: None,
             pending_menu: Vec::new(),
             pending_tray: Vec::new(),
             launcher: None,
@@ -228,6 +233,42 @@ impl App {
         }
     }
 
+    /// Records the check, whatever its result, so the next one waits a week,
+    /// and offers a newer release in Home and the tray menu. Failures stay silent.
+    fn finish_update_check(&mut self, release: Option<snipping_tool_ul::update_check::Release>) {
+        let now = unix_now();
+        self.config.general.last_update_check = now;
+        if let Some(sw) = &mut self.settings_window {
+            // An open Settings window saves its own copy; keep it current.
+            sw.config.general.last_update_check = now;
+        }
+        if let Err(error) = self.config.save() {
+            tracing::warn!("Could not record the update check: {error}");
+        }
+        let Some(release) = release else {
+            return;
+        };
+        tracing::info!("Update available: {}", release.version);
+        if let Some(tray) = &mut self.tray {
+            if let Err(error) = tray.show_update(&release.version) {
+                tracing::warn!("Could not add the update menu item: {error}");
+            }
+        }
+        if let Some(home) = &mut self.launcher {
+            home.model.update = Some(release.version.clone());
+            home.window.request_redraw();
+        }
+        self.update = Some(release);
+    }
+
+    fn open_update_page(&self) {
+        if let Some(release) = &self.update {
+            if let Err(error) = snipping_tool_ul::update_check::open_release_page(&release.url) {
+                tracing::warn!("Could not open the release page: {error}");
+            }
+        }
+    }
+
     fn show_home(&mut self, event_loop: &ActiveEventLoop) {
         if self.picker_active || self.countdown.is_some() || self.capture_at.is_some() {
             return;
@@ -255,6 +296,7 @@ impl App {
             home.model.workflow = self.config.workflow.clone();
             home.model.upload_feedback = self.editor_ui.header.upload_feedback.clone();
             home.model.history_enabled = self.config.general.history_enabled;
+            home.model.update = self.update.as_ref().map(|r| r.version.clone());
             home.model.hotkey = self
                 .registered_hotkey
                 .clone()
@@ -360,6 +402,7 @@ impl App {
             }
             HomeAction::Settings => self.open_settings(event_loop),
             HomeAction::History => self.open_history(event_loop),
+            HomeAction::OpenUpdate => self.open_update_page(),
             HomeAction::Upload => self.do_upload(event_loop, false),
             HomeAction::DismissUploadFeedback => self.set_upload_feedback(UploadFeedback::None),
             HomeAction::UploadFeedbackBody => {}
@@ -969,6 +1012,7 @@ impl App {
         if let Some(home) = &mut self.launcher {
             home.model.workflow = self.config.workflow.clone();
             home.model.history_enabled = self.config.general.history_enabled;
+            home.model.update = self.update.as_ref().map(|r| r.version.clone());
             home.model.hotkey = self
                 .registered_hotkey
                 .clone()
@@ -1588,6 +1632,8 @@ impl App {
                         );
                         tray.autostart_check.set_checked(new_state);
                     }
+                } else if tray.update_id.as_ref() == Some(&event.id) {
+                    self.open_update_page();
                 } else if event.id == tray.history_id {
                     tracing::info!("History menu item clicked");
                     self.open_history(event_loop);
@@ -1935,6 +1981,7 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
+            UserEvent::UpdateChecked(release) => self.finish_update_check(release),
             UserEvent::OcrFinished {
                 operation,
                 revision,
@@ -4093,6 +4140,31 @@ impl App {
     }
 }
 
+/// Starts the weekly update check on its own thread when it is switched on
+/// and a week has passed. The thread makes one request and ends; nothing
+/// keeps running afterwards.
+fn start_update_check(config: &Config, proxy: &EventLoopProxy<UserEvent>) {
+    use snipping_tool_ul::update_check::{check_due, fetch_newer_release};
+    if !config.general.check_updates || !check_due(config.general.last_update_check, unix_now()) {
+        return;
+    }
+    let proxy = proxy.clone();
+    let spawned = std::thread::Builder::new()
+        .name("update-check".into())
+        .spawn(move || {
+            let _ = proxy.send_event(UserEvent::UpdateChecked(fetch_newer_release()));
+        });
+    if let Err(error) = spawned {
+        tracing::warn!("Update check not started: {error}");
+    }
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
 fn run_tray_app(config: Config, show_home: bool) {
     let event_loop = match EventLoop::<UserEvent>::with_user_event().build() {
         Ok(el) => el,
@@ -4126,6 +4198,7 @@ fn run_tray_app(config: Config, show_home: bool) {
     MenuEvent::set_event_handler(Some(move |event| {
         let _ = menu_proxy.send_event(UserEvent::Menu(event));
     }));
+    start_update_check(&config, &proxy);
     let mut app = App::new(config, proxy);
     app.show_home_on_start = show_home;
     if let Err(e) = event_loop.run_app(&mut app) {

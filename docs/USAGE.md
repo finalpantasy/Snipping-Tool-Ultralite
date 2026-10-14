@@ -44,6 +44,8 @@ Uploads happen only when clicked. Failed uploads preserve the image for retry. N
 
 **Auto-save** is off by default. Turn it on in Options to save each original capture as a PNG in **Pictures > Snipping Tool UL**. Change its folder in **Settings > General > Auto-save folder > Change**. Missing custom folders are created; unavailable destinations report an error instead of silently using another folder. Manual **Save** always opens a filename chooser and saves the current annotations separately. Image rendering and encoding happen after choosing a path, so cancelling avoids that work. Native Windows dialog latency has not been measured in this preview.
 
+**Update check:** once a week at most, when the app starts, UL asks GitHub's public release list whether a newer version exists. It is one request with a short timeout; failures are silent and nothing is downloaded or installed. A newer version shows an **Update available** link in Home and at the top of the tray menu, which opens the release page in your browser. Turn it off in **Settings > General > Check for updates weekly**. Uploading is the only other time UL goes online.
+
 Settings: `%AppData%/snipping-tool-ul/config.toml`. Optional history: `%LocalAppData%/snipping-tool-ul/history`. `SNIPPING_TOOL_UL_CONFIG_DIR` redirects both for isolated testing.
 
 ## Development

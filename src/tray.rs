@@ -14,6 +14,9 @@ pub struct TrayState {
     pub settings_id: tray_icon::menu::MenuId,
     pub about_id: tray_icon::menu::MenuId,
     pub quit_id: tray_icon::menu::MenuId,
+    /// Set once the weekly check finds a newer release.
+    pub update_id: Option<tray_icon::menu::MenuId>,
+    menu: Menu,
     pub _tray: tray_icon::TrayIcon,
 }
 
@@ -58,7 +61,7 @@ pub fn create_tray() -> Result<TrayState, String> {
     menu.append(&quit_item).map_err(|e| e.to_string())?;
 
     let tray = TrayIconBuilder::new()
-        .with_menu(Box::new(menu))
+        .with_menu(Box::new(menu.clone()))
         .with_menu_on_left_click(false)
         .with_tooltip("Snipping Tool UL")
         .with_icon(icon)
@@ -78,11 +81,24 @@ pub fn create_tray() -> Result<TrayState, String> {
         settings_id,
         about_id,
         quit_id,
+        update_id: None,
+        menu,
         _tray: tray,
     })
 }
 
 impl TrayState {
+    /// Adds an "Update available" item at the top of the menu, once.
+    pub fn show_update(&mut self, version: &str) -> Result<(), String> {
+        if self.update_id.is_some() {
+            return Ok(());
+        }
+        let item = MenuItem::new(format!("Update available: {version}"), true, None);
+        self.menu.prepend(&item).map_err(|e| e.to_string())?;
+        self.update_id = Some(item.id().clone());
+        Ok(())
+    }
+
     pub fn update_capture_hotkey(&self, hotkey: Option<&str>) {
         let (label, tooltip) = capture_hotkey_text(hotkey);
         self.capture_item.set_text(label);

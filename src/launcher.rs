@@ -58,6 +58,7 @@ pub enum Action {
     ToggleTools,
     ToggleColors,
     CustomColor,
+    OpenUpdate,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Menu {
@@ -101,6 +102,8 @@ pub struct Model {
     pub hovered: Option<Action>,
     pub keyboard_focus: bool,
     pub icons: RefCell<IconCache>,
+    /// Version of a newer release found by the weekly check.
+    pub update: Option<String>,
 }
 impl Model {
     pub fn new(workflow: WorkflowConfig, hotkey: String) -> Self {
@@ -120,6 +123,7 @@ impl Model {
             hovered: None,
             keyboard_focus: false,
             icons: RefCell::new(IconCache::new()),
+            update: None,
         }
     }
     /// The empty launcher is a command strip, not an unused image canvas.
@@ -138,6 +142,21 @@ impl Model {
     }
     pub fn escape_dismisses_feedback(&self) -> bool {
         self.feedback_visible() && !self.upload_feedback.busy()
+    }
+    /// The Home "Update available" link and its click target, shown in place
+    /// of the idle hint when the weekly check found a newer release.
+    pub fn update_link(&self) -> Option<(Rect, String)> {
+        let version = self.update.as_ref()?;
+        if !self.status.is_empty()
+            || self.menu != Menu::None
+            || self.connecting
+            || self.upload_feedback.visible()
+        {
+            return None;
+        }
+        let text = format!("Update available: {version}");
+        let width = ui::measure(&text, 11.);
+        Some((Rect::new(638. - width - 4., 74., width + 8., 22.), text))
     }
     pub fn feedback_rect(&self, w: f32, editor: bool) -> Rect {
         Rect::new(w - if editor { 355. } else { 441. }, 68., 320., 110.)
@@ -301,6 +320,12 @@ impl Model {
         } else {
             let mut targets = self.feedback_targets(WIDTH as f32, false);
             targets.extend(self.bar_targets(WIDTH as f32, false));
+            if let Some(r) = self.update_link() {
+                targets.push(Target {
+                    rect: r.0,
+                    action: Action::OpenUpdate,
+                });
+            }
             targets
         }
     }
@@ -810,7 +835,13 @@ impl Model {
                 label.pop();
             }
             let width = ui::measure(&label, 11. * scale) / scale;
-            if !self.upload_feedback.visible() {
+            if let Some((r, text)) = self.update_link() {
+                // Replaces the idle hint; a real status message still wins.
+                c.label(r.x + 4., 78., &text, 11., ui::accent());
+                if self.hovered == Some(Action::OpenUpdate) {
+                    c.round(Rect::new(r.x + 4., 93., r.w - 8., 1.), 0., ui::accent(), 1.);
+                }
+            } else if !self.upload_feedback.visible() {
                 c.label(638. - width, 78., &label, 11., ui::muted());
             }
         }

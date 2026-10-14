@@ -72,7 +72,7 @@ That's it. Nothing is installed. To close it completely, use **Options > Quit Sn
 
 ## Privacy
 
-- No account, no tracking, no update pings. The app only goes online when you press **Upload**.
+- No account and no tracking. The app goes online in two cases: when you press **Upload**, and once a week at most to ask GitHub whether a newer version exists. That check sends nothing about you or your snips, never downloads or installs anything, and only shows an "Update available" link. Turn it off in **Settings > General > Check for updates weekly**.
 - Uploads go to Catbox, Freeimage.host or Litterbox (expires on its own). Those links are public, so anyone with the link can see the image. [Details](docs/UPLOAD-HOSTS.md)
 - History and auto-save are off until you turn them on.
 - Copying text out of a snip uses Windows' built-in text recognition, on your PC.

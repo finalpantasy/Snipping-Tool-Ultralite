@@ -63,6 +63,12 @@ pub struct GeneralConfig {
     /// Main home/editor X exits the process instead of leaving tray and hotkeys running.
     #[serde(default)]
     pub quit_on_close: bool,
+    /// Ask GitHub for a newer release at most once a week, at app start.
+    #[serde(default = "default_true")]
+    pub check_updates: bool,
+    /// Unix seconds of the last update check; 0 means never.
+    #[serde(default)]
+    pub last_update_check: u64,
 }
 
 impl Default for GeneralConfig {
@@ -75,6 +81,8 @@ impl Default for GeneralConfig {
             history_enabled: false,
             theme: d_theme(),
             quit_on_close: false,
+            check_updates: true,
+            last_update_check: 0,
         }
     }
 }

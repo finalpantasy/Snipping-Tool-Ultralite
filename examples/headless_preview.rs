@@ -25,6 +25,11 @@ fn main() {
             .save_png(out.join(format!("home-dpi-{percent}.png")))
             .unwrap();
     }
+    // The weekly update check found a newer release.
+    model.update = Some("0.3.24".into());
+    model.render(&mut canvas);
+    canvas.save_png(out.join("home-update.png")).unwrap();
+    model.update = None;
     model.has_image = true;
     model.connected = true;
     model.status = "Copied to clipboard. Preview opens automatically.".into();

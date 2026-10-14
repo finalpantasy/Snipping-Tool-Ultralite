@@ -12,7 +12,7 @@ use crate::ui::{measure, Canvas, Rect};
 
 /// Width / height of the settings window in logical pixels.
 pub const WIN_W: u32 = 420;
-pub const WIN_H: u32 = 560;
+pub const WIN_H: u32 = 590;
 
 /// Same annotation colors used by the editor, with stable saved names.
 const COLOR_CHOICES: &[(&str, Color)] = &[
@@ -46,6 +46,7 @@ pub enum Action {
     BrowseDir,
     ToggleAutostart,
     ToggleHistory,
+    ToggleUpdateCheck,
     ToggleTheme,
     SetCloseBehavior(bool),
     TakeOverWindows,
@@ -576,6 +577,11 @@ impl SettingsUi {
                 self.needs_redraw = true;
                 false
             }
+            Action::ToggleUpdateCheck => {
+                self.config.general.check_updates = !self.config.general.check_updates;
+                self.needs_redraw = true;
+                false
+            }
             Action::TakeOverWindows | Action::RestoreWindows => false,
             Action::ToggleTheme => {
                 let now_light = !self.config.general.theme.eq_ignore_ascii_case("light");
@@ -713,7 +719,7 @@ fn render_general_tab(p: &mut Painter, config: &Config, autostart: bool, editing
     p.text_right(ROW_R, row.y + row.h / 2., uploads, 12., theme::text_muted());
 
     // App behavior
-    let top = p.section(324., "App", ROW_H * 4.);
+    let top = p.section(324., "App", ROW_H * 5.);
     let row = p.row(top, ROW_H, "Theme");
     let light = general.theme.eq_ignore_ascii_case("light");
     let segs = p.segmented(row, &["Dark", "Light"], usize::from(light));
@@ -734,6 +740,10 @@ fn render_general_tab(p: &mut Painter, config: &Config, autostart: bool, editing
     );
     p.hit(segs[0], Action::SetCloseBehavior(false));
     p.hit(segs[1], Action::SetCloseBehavior(true));
+    p.divider(top + ROW_H * 4.);
+    // One request to GitHub a week at most; never downloads anything.
+    let row = p.row(top + ROW_H * 4., ROW_H, "Check for updates weekly");
+    p.switch(row, general.check_updates, Action::ToggleUpdateCheck);
 }
 
 fn render_shortcuts_tab(p: &mut Painter, config: &Config, editing: Option<usize>) {

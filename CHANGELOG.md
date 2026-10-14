@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Weekly update check, on by default: at most once every 7 days, at start, the app asks GitHub whether a newer version exists and shows an **Update available** link in Home and the tray menu. It never downloads or installs anything. Turn it off in **Settings > General > Check for updates weekly**.
 - Fixed a possible crash when the editor was minimized from the keyboard with the annotation menu open.
 - Fixed right-click during a text edit selecting, deleting or resizing the wrong annotation.
 - Region drags that reach the right or bottom screen edge now include the last pixel column or row.
