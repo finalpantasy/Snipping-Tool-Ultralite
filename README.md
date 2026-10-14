@@ -11,19 +11,29 @@ Take a snip and it is already on your clipboard, with the editor open. Annotate 
 
 ## Compared with Windows Snipping Tool
 
-Same PC and Windows session, 30 launches of each app after 5 warm-up launches. Medians, measured October 14, 2026 with UL 0.3.21 and Microsoft Snipping Tool 11.2608.41.0.
+Same PC and Windows session, three 4K monitors at 150% scaling. 30 runs of each app after 5 warm-up runs; medians. Measured October 14, 2026 with UL 0.3.22 and Microsoft Snipping Tool 11.2608.41.0.
+
+**Taking a snip** (hotkey, drag a 1280 x 720 region, release)
+
+| | Snipping Tool UL | Windows Snipping Tool |
+| --- | ---: | ---: |
+| Hotkey to selection screen | **155 ms** | 355 ms |
+| Release to image on clipboard | **50 ms** | 76 ms |
+| Release to editor open | **78 ms** | no editor, shows a notification |
+| Memory while capturing | **29 MB** | 484 MB |
+
+**Opening the app**
 
 | | Snipping Tool UL | Windows Snipping Tool |
 | --- | ---: | ---: |
 | Launch to window | **47 ms** | 235 ms |
 | CPU time spent starting | **94 ms** | 469 ms |
-| Private memory, window open | **10 MB** | 102 MB |
-| Working set, window open | **38 MB** | 130 MB |
-| Threads | **19** | 97 |
+| Memory, window open | **10 MB** | 102 MB |
+| Threads | **19** | 99 |
 | CPU while idle | none measurable | none measurable |
 | Size on disk | **10 MB**, one exe | about 420 MB, plus Windows App Runtime |
 
-A second, independent harness measured startup at 63 ms for UL and 257 ms for Windows Snipping Tool. Capture-to-clipboard and OCR speed have not been compared yet. [Method and limits](docs/PERFORMANCE.md)
+Memory is private bytes. 59 of 60 measured snips were exact; one UL snip came out larger than the drawn area. UL stays in the tray between snips (about 43 MB after a capture); Windows Snipping Tool exits after each snip. OCR speed has not been compared yet. [Method and limits](docs/PERFORMANCE.md)
 
 ## What it does
 

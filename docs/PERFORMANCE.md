@@ -1,6 +1,6 @@
 # Snipping Tool UL performance
 
-Component measurements from October 12-13, 2026, and a startup and memory comparison with Microsoft's Snipping Tool from October 14, 2026.
+Component measurements from October 12-13, 2026, and a capture, startup and memory comparison with Microsoft's Snipping Tool from October 14, 2026.
 
 [Download and overview](../README.md) | [Release verification](VERIFICATION-0.3.22.md)
 
@@ -82,38 +82,43 @@ Earlier conservative memory-variation guards failed and remain recorded. Longer 
 
 ## Microsoft stock Snipping Tool comparison
 
-### Startup and memory: measured
+UL 0.3.22 and Microsoft Snipping Tool 11.2608.41.0, measured October 14, 2026 on one Windows 11 PC (16-core desktop CPU, 64 GB RAM) with three 3840 x 2160 monitors at 150% scaling, one at a negative origin. Both apps used their own capture hotkeys and their normal settings: Microsoft saved each snip to Pictures\Screenshots (its default) and UL kept History on, so both wrote every snip to disk. Five warm-up rounds, then 30 measured rounds; the apps alternated which went first each round. File caches were warm, so none of these are cold starts.
 
-UL 0.3.21 and Microsoft Snipping Tool 11.2608.41.0, same PC and Windows 11 session, October 14, 2026. Each trial started a fresh process with no arguments on a private, never-displayed Win32 desktop, so the launches could not take focus or be disturbed by input. Five warm-up rounds, then 30 measured rounds; the two apps alternated which went first each round. OS file caches were warm, so these are not cold starts.
+### Region capture
 
-| Median (p95) | UL 0.3.21 | Microsoft 11.2608.41.0 |
+A topmost window filled the primary monitor with a known tile pattern. Each trial cleared the clipboard, sent the app's hotkey (Win+Shift+S for Microsoft, Ctrl+Shift+S for UL), waited for a new window covering the primary monitor, waited a fixed 300 ms, then dragged from (600, 400) to (1880, 1120) in physical pixels and released. The clipboard bitmap was read back and five interior pixels checked against the pattern.
+
+| Median (p95) | UL 0.3.22 | Microsoft 11.2608.41.0 |
 | --- | ---: | ---: |
-| Process start to first visible titled window | 47 ms (80) | 235 ms (284) |
-| Process start to CPU settled (last 50 ms tick using over 1 ms CPU, then 500 ms quiet) | 125 ms (471) | 378 ms (886) |
-| CPU time used by then | 94 ms (141) | 469 ms (594) |
-| Private bytes, 1 s after settling | 10.2 MB | 101.8 MB |
-| Working set, 1 s after settling | 37.5 MB | 130.0 MB |
-| Handles / threads | 450 / 19 | 1,297 / 97 |
+| Hotkey to selection window visible | 155 ms (160) | 355 ms (382) |
+| Release to bitmap readable from the clipboard | 50 ms (53) | 76 ms (601) |
+| Release to editor window visible | 78 ms (80) | none; Microsoft shows a notification |
+| Private bytes when the bitmap was readable | 29 MB (39) | 484 MB (502) |
+| Peak working set of the capturing process | 288 MB | 514 MB |
+| Processes left after the snip | 1 (tray, about 43 MB private) | 0 |
+| Correct size and pixels | 29 of 30 | 30 of 30 |
+
+Image sizes were 1280 x 720 for UL and 1279 x 720 for Microsoft; the apps treat the end pixel differently. Microsoft's p95 clipboard time reflects occasional 600 ms waits. UL's peak working set includes its frozen copy of all three 4K monitors.
+
+**Bug found and fixed by this test.** When the pointer kept moving immediately after release, UL committed the later pointer position: a release followed 1 ms later by a 300 px move captured 1580 x 1020 in 9 of 10 trials, while Microsoft was correct in 10 of 10. The picker now uses each mouse message's own coordinates; the same test then gave 15 of 15 exact results with unchanged timings. In the main run, one measured UL trial (iteration 20) came out 1570 x 887: the start corner was exact, but the end corner was a point the harness never sent. Its cause is not confirmed.
+
+### Startup and memory
+
+Each trial started a fresh process with no arguments on a private, never-displayed Win32 desktop, so launches could not take focus or be disturbed by input. All 60 measured launches succeeded.
+
+| Median (p95) | UL 0.3.22 | Microsoft 11.2608.41.0 |
+| --- | ---: | ---: |
+| Process start to first visible titled window | 47 ms (78) | 235 ms (265) |
+| Process start to CPU settled (last 50 ms tick using over 1 ms CPU, then 500 ms quiet) | 125 ms (426) | 374 ms (720) |
+| CPU time used by then | 94 ms (156) | 469 ms (609) |
+| Private bytes, 1 s after settling | 10.3 MB | 102.0 MB |
+| Working set, 1 s after settling | 37.5 MB | 130.5 MB |
+| Handles / threads | 450 / 19 | 1,323 / 99 |
 | CPU over 10 s idle with the window open | below counter resolution | below counter resolution |
 | Package size on disk | 10.0 MB executable | about 420 MB (586 MB logical, hard-linked duplicates), plus Windows App Runtime and WinUI dependencies |
 
-Three of the 60 measured launches (two UL, one Microsoft) showed no window within 20 s and are excluded. They coincided with a second benchmark running on the same machine, which also stopped processes by name. Part of the run overlapped that load, so absolute times may be slightly high; the ratio is consistent with the second harness, which launched on the visible desktop and measured 62.6 ms (p95 88.6) for UL and 256.7 ms (p95 392.1) for Microsoft.
-
-A visible window is not the same as a fully drawn, input-ready window; the CPU-settled time is the closer proxy. UL also keeps a tray process when its window is closed (about 2 MB private, 12 MB working set, effectively no CPU); Microsoft's app keeps no resident process.
+An earlier run on UL 0.3.21 gave the same medians within 1 ms and 0.2 MB. A second harness, launching on the visible desktop, measured 62.6 ms for UL and 256.7 ms for Microsoft. A visible window is not the same as a fully drawn, input-ready window; the CPU-settled time is the closer proxy.
 
 ### Still to measure
 
-Capture-to-editor, capture-to-clipboard, OCR and sustained use have not been compared. A fair comparison requires both applications in the same Windows environment:
-
-| Measurement | Matched procedure |
-| --- | --- |
-| Startup | Record exact app/Windows versions; measure new-process startup and warm reopen separately, with the same visible-and-ready criterion |
-| Idle resources | Measure private commit, working set, CPU-time delta, handles and threads over equal idle intervals; separate open editor and background/tray states where supported |
-| Region capture | Use the same authored 1080p/4K desktop and fixed region; time selection activation and completed selection-to-editor separately |
-| Clipboard readiness | Measure completed selection-to-successful bitmap retrieval, including encoding/publication; verify dimensions and image content |
-| OCR | Use identical authored images and check output markers; include the complete user-action-to-result time separately from any exposed engine timings |
-| Sustained use | Repeat the same capture/edit/copy/close sequence; compare warm baselines and post-cleanup resource trends |
-
-Keep display scale, monitor layout, capture mode and equivalent features consistent. Record defaults first; report any altered settings, such as history, auto-save or automatic OCR. Alternate application order, retain per-trial results, and report sample counts, medians and p95 alongside failures. Use at least 30 measured trials after five warmups for repeated latency comparisons. Record the cold-start reset method separately; a fresh process alone does not establish cold OS caches.
-
-Results from synthetic UL components cannot substitute for that comparison. Native mixed-monitor behavior, full interactive memory and end-to-end latency remain separate acceptance work.
+OCR, sustained use over long sessions, cold starts after a reboot, and single-monitor or 100% scaling setups have not been compared.
