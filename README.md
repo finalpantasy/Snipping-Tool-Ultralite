@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.23-preview/Snipping-Tool-UL-0.3.23-Windows-x64.zip"><b>Download for Windows</b></a>
+  <a href="https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.24-preview/Snipping-Tool-UL-0.3.24-Windows-x64.zip"><b>Download for Windows</b></a>
   &nbsp;·&nbsp; <a href="docs/USAGE.md">User guide</a>
   &nbsp;·&nbsp; <a href="CHANGELOG.md">What's new</a>
 </p>
@@ -27,7 +27,7 @@
 - **Your snip is ready the moment you let go.** It's already on your clipboard, so you can paste it anywhere, and the editor opens by itself in case you want to draw on it.
 - **It's tiny.** One 10 MB file. No installer, no account, no ads.
 - **It stays out of your way.** When you're not snipping it uses no measurable CPU. While snipping it uses about 30 MB of memory; Windows' own tool uses close to 500 MB.
-- **Your screenshots stay on your PC.** Nothing is sent anywhere unless you press Upload.
+- **Your screenshots stay on your PC.** A snip only leaves your computer when you press Upload.
 
 ## How it compares
 
@@ -62,7 +62,7 @@ ShareX, Greenshot and Flameshot are being measured the same way next.
 
 ## Get started in 30 seconds
 
-1. [Download the ZIP](https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.23-preview/Snipping-Tool-UL-0.3.23-Windows-x64.zip) and unzip it anywhere.
+1. [Download the ZIP](https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.24-preview/Snipping-Tool-UL-0.3.24-Windows-x64.zip) and unzip it anywhere.
 2. Double-click `snipping-tool-ul.exe`.
 3. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>, drag over what you want, and paste.
 
@@ -109,7 +109,7 @@ cargo test --locked
 
 ## Status
 
-0.3.23 is a preview release. Not yet verified: monitors with mixed scaling, live uploads to every host, and memory use over very long sessions. [Release checks](docs/VERIFICATION-0.3.23.md)
+0.3.24 is a preview release. Not yet verified: monitors with mixed scaling, live uploads to every host, and memory use over very long sessions. [Release checks](docs/VERIFICATION-0.3.24.md)
 
 Found a bug? [Open an issue](https://github.com/finalpantasy/Snipping-Tool-Ultralite/issues) with your Windows version, display scaling and the steps that cause it.
 

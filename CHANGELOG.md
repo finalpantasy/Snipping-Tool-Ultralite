@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.24 preview
 
 - Weekly update check, on by default: at most once every 7 days, at start, the app asks GitHub whether a newer version exists and shows an **Update available** link in Home and the tray menu. It never downloads or installs anything. Turn it off in **Settings > General > Check for updates weekly**.
 - Fixed a possible crash when the editor was minimized from the keyboard with the annotation menu open.
@@ -9,6 +9,7 @@
 - The shortcut recorder accepts Ctrl+Shift+digit and digits on AZERTY keyboards.
 - Switching tools mid-drag no longer leaves a ghost shape; the eyedropper no longer picks colors from outside the image; a failed history copy now says why.
 - The editor holds about 5 MB less memory at the default size (33 MB less at 4K), and Copy, Save, Upload and Pin without annotations use half the peak memory.
+- Copying an image prepares it fully before opening the clipboard, so other apps never see it locked or empty mid-copy. A 4K copy is about 20% faster to prepare and uses about 33 MB less temporary memory.
 - Alignment pass: toolbar labels share one baseline, dropdown, gear, Undo/Redo, zoom, Settings title, host menu, upload notice and History grid are centred. See [the pass notes](docs/POLISH-PASS-2026-10-14.md).
 
 ## 0.3.23 preview
