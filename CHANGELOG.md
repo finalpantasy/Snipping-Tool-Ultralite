@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.25 preview
 
 - About now has a **Support on Ko-fi** button that opens ko-fi.com/finalpantasy in your browser.
 
