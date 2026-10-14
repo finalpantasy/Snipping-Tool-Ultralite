@@ -1,8 +1,8 @@
 # Snipping Tool UL performance
 
-Recorded Windows measurements from October 12-13, 2026. Comparison availability checked October 14, 2026. These results document improvements inside UL; they do not establish a quantitative advantage over Microsoft's stock Snipping Tool.
+Component measurements from October 12-13, 2026, and a startup and memory comparison with Microsoft's Snipping Tool from October 14, 2026.
 
-[Download and overview](../README.md) | [Release verification](VERIFICATION-0.3.21.md)
+[Download and overview](../README.md) | [Release verification](VERIFICATION-0.3.22.md)
 
 ## Results at a glance
 
@@ -82,11 +82,28 @@ Earlier conservative memory-variation guards failed and remain recorded. Longer 
 
 ## Microsoft stock Snipping Tool comparison
 
-**No matched stock-versus-UL benchmark has been completed.** Startup, idle CPU/RAM, capture-to-editor, capture-to-paste and sustained interactive-use advantages remain unquantified.
+### Startup and memory: measured
 
-The initial October 14 availability check found no current-user Microsoft.ScreenSketch registration or matching stock package directory/executable. A later check, after installation, confirmed Microsoft Snipping Tool **11.2608.41.0** and its packaged executable. Stock availability is no longer a blocker. Windows Sandbox and Hyper-V management were unavailable, and no Sandbox, Hyper-V, VirtualBox or VMware guest process was running at the inspection. Matched runtime measurements remain pending a suitable test session; no stock runtime benchmark is claimed.
+UL 0.3.21 and Microsoft Snipping Tool 11.2608.41.0, same PC and Windows 11 session, October 14, 2026. Each trial started a fresh process with no arguments on a private, never-displayed Win32 desktop, so the launches could not take focus or be disturbed by input. Five warm-up rounds, then 30 measured rounds; the two apps alternated which went first each round. OS file caches were warm, so these are not cold starts.
 
-A fair comparison requires both applications in the same isolated Windows environment:
+| Median (p95) | UL 0.3.21 | Microsoft 11.2608.41.0 |
+| --- | ---: | ---: |
+| Process start to first visible titled window | 47 ms (80) | 235 ms (284) |
+| Process start to CPU settled (last 50 ms tick using over 1 ms CPU, then 500 ms quiet) | 125 ms (471) | 378 ms (886) |
+| CPU time used by then | 94 ms (141) | 469 ms (594) |
+| Private bytes, 1 s after settling | 10.2 MB | 101.8 MB |
+| Working set, 1 s after settling | 37.5 MB | 130.0 MB |
+| Handles / threads | 450 / 19 | 1,297 / 97 |
+| CPU over 10 s idle with the window open | below counter resolution | below counter resolution |
+| Package size on disk | 10.0 MB executable | about 420 MB (586 MB logical, hard-linked duplicates), plus Windows App Runtime and WinUI dependencies |
+
+Three of the 60 measured launches (two UL, one Microsoft) showed no window within 20 s and are excluded. They coincided with a second benchmark running on the same machine, which also stopped processes by name. Part of the run overlapped that load, so absolute times may be slightly high; the ratio is consistent with the second harness, which launched on the visible desktop and measured 62.6 ms (p95 88.6) for UL and 256.7 ms (p95 392.1) for Microsoft.
+
+A visible window is not the same as a fully drawn, input-ready window; the CPU-settled time is the closer proxy. UL also keeps a tray process when its window is closed (about 2 MB private, 12 MB working set, effectively no CPU); Microsoft's app keeps no resident process.
+
+### Still to measure
+
+Capture-to-editor, capture-to-clipboard, OCR and sustained use have not been compared. A fair comparison requires both applications in the same Windows environment:
 
 | Measurement | Matched procedure |
 | --- | --- |
