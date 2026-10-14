@@ -84,7 +84,7 @@ Earlier conservative memory-variation guards failed and remain recorded. Longer 
 
 **No matched stock-versus-UL benchmark has been completed.** Startup, idle CPU/RAM, capture-to-editor, capture-to-paste and sustained interactive-use advantages remain unquantified.
 
-The October 14 availability check found no current-user Microsoft.ScreenSketch registration or matching stock package directory/executable. Windows Sandbox was unavailable, Hyper-V management was unavailable, and no Sandbox, Hyper-V, VirtualBox or VMware guest process was running. Stock runtime testing could not proceed in an available isolated environment. This describes the inspected development host; it is not a claim that Windows Snipping Tool cannot be tested elsewhere.
+The initial October 14 availability check found no current-user Microsoft.ScreenSketch registration or matching stock package directory/executable. A later check, after installation, confirmed Microsoft Snipping Tool **11.2608.41.0** and its packaged executable. Stock availability is no longer a blocker. Windows Sandbox and Hyper-V management were unavailable, and no Sandbox, Hyper-V, VirtualBox or VMware guest process was running at the inspection. Matched runtime measurements remain pending a suitable test session; no stock runtime benchmark is claimed.
 
 A fair comparison requires both applications in the same isolated Windows environment:
 
