@@ -2,7 +2,9 @@
 mod windows;
 
 #[cfg(target_os = "windows")]
-pub use windows::{capture_region, initialize_dpi, virtual_bounds};
+pub use windows::{
+    capture_frozen_desktop, capture_region, initialize_dpi, virtual_bounds, BgraSnapshot,
+};
 
 /// Physical virtual-desktop coordinates, including negative monitor origins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

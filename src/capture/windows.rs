@@ -1,8 +1,8 @@
 use super::{CaptureError, CapturedScreen, ScreenCapture, ScreenRect};
 use windows::Win32::Graphics::Gdi::{
-    BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits,
-    GetDeviceCaps, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CAPTUREBLT, DIB_RGB_COLORS,
-    LOGPIXELSX, SRCCOPY,
+    BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject,
+    GdiFlush, GetDIBits, GetDeviceCaps, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+    CAPTUREBLT, DIB_RGB_COLORS, HBITMAP, HDC, HGDIOBJ, LOGPIXELSX, SRCCOPY,
 };
 use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -57,6 +57,211 @@ impl ScreenCapture for WindowsCapturer {
 
 unsafe fn capture_virtual_desktop() -> Result<CapturedScreen, CaptureError> {
     capture_region(virtual_bounds())
+}
+
+/// Freeze the whole virtual desktop for the selection UI. The screen is copied
+/// once, straight into a DIB section in GDI's own layout; nothing converts or
+/// copies the full frame again before it is painted.
+pub fn capture_frozen_desktop() -> Result<BgraSnapshot, CaptureError> {
+    let rect = virtual_bounds();
+    unsafe {
+        let screen = GetDC(None);
+        if screen.is_invalid() {
+            return Err(CaptureError::PlatformError(
+                "Failed to get screen DC".to_string(),
+            ));
+        }
+        // 96 DPI is 100% scaling.
+        let dpi = GetDeviceCaps(screen, LOGPIXELSX);
+        let scale_factor = if dpi > 0 { dpi as f64 / 96.0 } else { 1.0 };
+        let snapshot = BgraSnapshot::from_dc(screen, rect, scale_factor);
+        ReleaseDC(None, screen);
+        snapshot
+    }
+}
+
+/// A frozen desktop held in a top-down 32-bit DIB section: native BGRA with an
+/// undefined fourth byte. Painting it is a plain BitBlt, and only a selected
+/// rectangle is ever converted to the RGBA `CapturedScreen` contract.
+///
+/// Owns GDI objects bound to the creating thread's use; it is neither `Send`
+/// nor `Sync`.
+pub struct BgraSnapshot {
+    dc: HDC,
+    bitmap: HBITMAP,
+    previous: HGDIOBJ,
+    bits: *const u8,
+    bounds: ScreenRect,
+    scale_factor: f64,
+}
+
+impl BgraSnapshot {
+    /// Copy `rect` of `source` (a screen or memory DC, in its own coordinates)
+    /// into a new snapshot whose bounds are `rect`.
+    ///
+    /// # Safety
+    /// `source` must be a valid device context for the duration of the call.
+    pub unsafe fn from_dc(
+        source: HDC,
+        rect: ScreenRect,
+        scale_factor: f64,
+    ) -> Result<Self, CaptureError> {
+        let width = i32::try_from(rect.width).map_err(|_| CaptureError::NoDisplay)?;
+        let height = i32::try_from(rect.height).map_err(|_| CaptureError::NoDisplay)?;
+        if width <= 0 || height <= 0 {
+            return Err(CaptureError::NoDisplay);
+        }
+        (rect.width as usize)
+            .checked_mul(rect.height as usize)
+            .and_then(|n| n.checked_mul(4))
+            .filter(|&n| n <= i32::MAX as usize)
+            .ok_or_else(|| CaptureError::PlatformError("Screen image is too large".into()))?;
+        let dc = CreateCompatibleDC(None);
+        if dc.is_invalid() {
+            return Err(CaptureError::PlatformError(
+                "Failed to create compatible DC".to_string(),
+            ));
+        }
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height, // top-down
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits = std::ptr::null_mut();
+        let bitmap = match CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, None, 0) {
+            Ok(bitmap) if !bits.is_null() => bitmap,
+            Ok(bitmap) => {
+                let _ = DeleteObject(bitmap);
+                let _ = DeleteDC(dc);
+                return Err(CaptureError::PlatformError(
+                    "Not enough memory for screen snapshot".into(),
+                ));
+            }
+            Err(_) => {
+                let _ = DeleteDC(dc);
+                return Err(CaptureError::PlatformError(
+                    "Not enough memory for screen snapshot".into(),
+                ));
+            }
+        };
+        let snapshot = Self {
+            dc,
+            bitmap,
+            previous: SelectObject(dc, bitmap),
+            bits: bits.cast(),
+            bounds: rect,
+            scale_factor,
+        };
+        // Include existing layered popups/tooltips in the frozen screen image.
+        BitBlt(
+            dc,
+            0,
+            0,
+            width,
+            height,
+            source,
+            rect.x,
+            rect.y,
+            SRCCOPY | CAPTUREBLT,
+        )
+        .map_err(|_| CaptureError::PlatformError("BitBlt failed".to_string()))?;
+        // The CPU reads the section directly; finish any batched GDI work.
+        let _ = GdiFlush();
+        Ok(snapshot)
+    }
+
+    /// Physical virtual-desktop bounds of the snapshot.
+    pub fn bounds(&self) -> ScreenRect {
+        self.bounds
+    }
+
+    pub fn scale_factor(&self) -> f64 {
+        self.scale_factor
+    }
+
+    /// Native BGRX rows, top-down, `width * 4` bytes each.
+    pub fn bgra(&self) -> &[u8] {
+        let len = self.bounds.width as usize * self.bounds.height as usize * 4;
+        // SAFETY: the section holds exactly `len` bytes, lives as long as
+        // `self`, and GDI only writes to it inside `from_dc`.
+        unsafe { std::slice::from_raw_parts(self.bits, len) }
+    }
+
+    /// Draw the snapshot at the DC origin. GDI clips the copy to the DC's
+    /// clip region, so a partial repaint only copies what was exposed.
+    ///
+    /// # Safety
+    /// `target` must be a valid device context.
+    pub unsafe fn paint(&self, target: HDC) -> Result<(), String> {
+        BitBlt(
+            target,
+            0,
+            0,
+            self.bounds.width as i32,
+            self.bounds.height as i32,
+            self.dc,
+            0,
+            0,
+            SRCCOPY,
+        )
+        .map_err(|_| "Could not display the frozen screen".to_string())
+    }
+
+    /// Copy the selected physical pixels as straight, opaque RGBA. No new
+    /// desktop read occurs here and the full snapshot is never converted.
+    pub fn region_rgba(&self, region: ScreenRect) -> Result<CapturedScreen, CaptureError> {
+        let region = region
+            .intersect(self.bounds)
+            .ok_or(CaptureError::NoDisplay)?;
+        let stride = self.bounds.width as usize * 4;
+        let row_bytes = region.width as usize * 4;
+        let len = row_bytes
+            .checked_mul(region.height as usize)
+            .ok_or_else(|| CaptureError::PlatformError("Invalid snapshot pixels".into()))?;
+        let mut pixels = Vec::new();
+        pixels.try_reserve_exact(len).map_err(|_| {
+            CaptureError::PlatformError("Not enough memory for selected image".into())
+        })?;
+        let x = (i64::from(region.x) - i64::from(self.bounds.x)) as usize;
+        let y = (i64::from(region.y) - i64::from(self.bounds.y)) as usize;
+        pixels.resize(len, 0);
+        let source = self.bgra();
+        for (out, row) in pixels.chunks_exact_mut(row_bytes).zip(y..) {
+            let offset = row * stride + x * 4;
+            // GDI leaves the fourth byte undefined; RGBA consumers need 255.
+            for (o, p) in out
+                .chunks_exact_mut(4)
+                .zip(source[offset..offset + row_bytes].chunks_exact(4))
+            {
+                o.copy_from_slice(&[p[2], p[1], p[0], 255]);
+            }
+        }
+        Ok(CapturedScreen {
+            pixels,
+            width: region.width,
+            height: region.height,
+            x_offset: region.x,
+            y_offset: region.y,
+            scale_factor: self.scale_factor,
+        })
+    }
+}
+
+impl Drop for BgraSnapshot {
+    fn drop(&mut self) {
+        unsafe {
+            SelectObject(self.dc, self.previous);
+            let _ = DeleteObject(self.bitmap);
+            let _ = DeleteDC(self.dc);
+        }
+    }
 }
 
 unsafe fn capture_rect(rect: ScreenRect) -> Result<CapturedScreen, CaptureError> {

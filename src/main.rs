@@ -642,22 +642,29 @@ impl App {
         }
     }
 
-    fn minimize_capture_windows(&mut self) {
+    /// Returns whether any UL window was on screen and has just been hidden.
+    fn minimize_capture_windows(&mut self) -> bool {
+        let mut hidden = false;
         if let Some(home) = &self.launcher {
-            self.restore_home_on_cancel |= snipping_tool_ul::ui::minimize_for_capture(&home.window);
+            let was_visible = snipping_tool_ul::ui::minimize_for_capture(&home.window);
+            self.restore_home_on_cancel |= was_visible;
+            hidden |= was_visible;
         }
         if let Some(window) = &self.overlay_window {
-            self.restore_home_on_cancel |= snipping_tool_ul::ui::minimize_for_capture(window);
+            let was_visible = snipping_tool_ul::ui::minimize_for_capture(window);
+            self.restore_home_on_cancel |= was_visible;
+            hidden |= was_visible;
         }
         if let Some(settings) = &self.settings_window {
-            snipping_tool_ul::ui::minimize_for_capture(&settings.window);
+            hidden |= snipping_tool_ul::ui::minimize_for_capture(&settings.window);
         }
         if let Some(history) = &self.history_window {
-            snipping_tool_ul::ui::minimize_for_capture(&history.window);
+            hidden |= snipping_tool_ul::ui::minimize_for_capture(&history.window);
         }
         if let Some(about) = &self.about_window {
-            snipping_tool_ul::ui::minimize_for_capture(&about.window);
+            hidden |= snipping_tool_ul::ui::minimize_for_capture(&about.window);
         }
+        hidden
     }
 
     fn restore_capture_canvas(&mut self, event_loop: &ActiveEventLoop) {
@@ -674,13 +681,26 @@ impl App {
         self.show_home(event_loop);
     }
 
-    fn trigger_capture(&mut self, _event_loop: &ActiveEventLoop) {
+    fn trigger_capture(&mut self, event_loop: &ActiveEventLoop) {
+        self.start_capture(event_loop, true);
+    }
+
+    /// The capture hotkey changes nothing on screen by itself. Unless a UL
+    /// window is hidden now, or a picker closed moments ago, the desktop can
+    /// be frozen without first waiting a display frame for DWM.
+    fn trigger_hotkey_capture(&mut self, event_loop: &ActiveEventLoop) {
+        self.start_capture(event_loop, false);
+    }
+
+    /// `flush`: UL changed the screen just before this call (a menu, a
+    /// countdown or a hidden window), so let DWM present that first.
+    fn start_capture(&mut self, _event_loop: &ActiveEventLoop, flush: bool) {
         if self.picker_active {
             return;
         }
         self.image_revision = self.image_revision.wrapping_add(1);
         self.set_upload_feedback(UploadFeedback::None);
-        self.minimize_capture_windows();
+        let flush = self.minimize_capture_windows() || flush;
         self.about_window = None;
         #[cfg(target_os = "windows")]
         {
@@ -694,6 +714,9 @@ impl App {
             let mode = self.capture_mode;
             self.picker_active = true;
             let proxy = self.proxy.clone();
+            // A picker hidden moments ago may still be on screen.
+            let flush = flush
+                || snipping_tool_ul::region_picker::dismissed_within(Duration::from_millis(250));
             let picker = std::thread::spawn(move || {
                 // If anything below panics, the guard still reports back so
                 // `picker_active` cannot stay set and block every later capture.
@@ -701,34 +724,41 @@ impl App {
                     proxy,
                     UserEvent::SnipReady(Err("Capture stopped unexpectedly. Try again.".into())),
                 );
+                // Outlives the result so freeing the desktop never delays the
+                // clipboard or the preview.
+                let mut frozen = None;
                 let result = (|| {
                     // Present the removal of UL's windows before sampling. The
                     // selection UI and final snip share exactly this snapshot.
-                    unsafe {
-                        let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+                    // With nothing of UL's on screen there is nothing to wait for.
+                    if flush {
+                        unsafe {
+                            let _ = windows::Win32::Graphics::Dwm::DwmFlush();
+                        }
                     }
                     let windows = if matches!(mode, CaptureMode::Window) {
                         snipping_tool_ul::window_detect::enumerate_window_rects()
                     } else {
                         Vec::new()
                     };
-                    let mut snapshot = capture::capture_region(capture::virtual_bounds())
-                        .map_err(|e| e.to_string())?;
+                    let snapshot: &capture::BgraSnapshot = frozen
+                        .insert(capture::capture_frozen_desktop().map_err(|e| e.to_string())?);
                     let rect = match mode {
                         CaptureMode::Region => {
-                            snipping_tool_ul::region_picker::select_region(&mut snapshot)
+                            snipping_tool_ul::region_picker::select_region(snapshot)
                         }
                         CaptureMode::Window => {
-                            snipping_tool_ul::region_picker::select_window(&mut snapshot, &windows)
+                            snipping_tool_ul::region_picker::select_window(snapshot, &windows)
                         }
                         CaptureMode::FullScreen => Ok(Some(snapshot.bounds())),
                     }?;
                     rect.map(|rect| {
                         // Selection acceptance is the copy request boundary.
                         let clipboard_ticket = snipping_tool_ul::clipboard_queue::reserve();
-                        let screen = snapshot.into_region(rect).map_err(|e| e.to_string())?;
+                        // Only the selection is converted to RGBA.
+                        let screen = snapshot.region_rgba(rect).map_err(|e| e.to_string())?;
                         // Populate the real Windows clipboard before displaying
-                        // the preview. The temporary full desktop is now released.
+                        // the preview.
                         let clipboard_error = match export::copy_with_ticket(
                             clipboard_ticket,
                             &screen.pixels,
@@ -750,6 +780,7 @@ impl App {
                     .transpose()
                 })();
                 ready.send(UserEvent::SnipReady(result));
+                drop(frozen);
             });
             drop(picker);
             self.launcher = None; // Release home render resources before the next capture.
@@ -758,6 +789,7 @@ impl App {
         }
         #[cfg(not(target_os = "windows"))]
         {
+            let _ = flush;
             let event_loop = _event_loop;
             if self.overlay_window.is_some() {
                 tracing::info!("Overlay already open, ignoring capture trigger");
@@ -2102,7 +2134,7 @@ impl ApplicationHandler<UserEvent> for App {
                             return;
                         }
                     }
-                    self.trigger_capture(event_loop);
+                    self.trigger_hotkey_capture(event_loop);
                 }
             }
             UserEvent::ShowHome => self.show_home(event_loop),
@@ -4018,7 +4050,7 @@ impl ApplicationHandler<UserEvent> for App {
                 && Some(event.id) == self.hotkey_id
             {
                 tracing::info!("Global hotkey pressed — triggering capture");
-                self.trigger_capture(event_loop);
+                self.trigger_hotkey_capture(event_loop);
             }
         }
 
