@@ -86,3 +86,23 @@ fn only_the_copy_button_drags_out() {
         );
     }
 }
+
+#[test]
+fn settings_written_by_test_builds_still_load() {
+    // A preview build wrote `drag_tip_shown`; later builds must not treat the
+    // file as broken (which would back it up and reset the user's settings).
+    let saved = r#"
+[general]
+default_color = "blue"
+history_enabled = true
+last_update_check = 1792010374
+drag_tip_shown = true
+
+[hotkey]
+capture = "Ctrl+Alt+S"
+"#;
+    let config: Config = toml::from_str(saved).expect("older preview settings load");
+    assert_eq!(config.general.default_color, "blue");
+    assert!(config.general.history_enabled);
+    assert_eq!(config.hotkey.capture, "Ctrl+Alt+S");
+}
