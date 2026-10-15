@@ -67,14 +67,22 @@ fn copy_state_follows_edits_text_and_other_apps() {
 }
 
 #[test]
-fn size_label_is_the_drag_handle_at_every_supported_size() {
+fn only_the_copy_button_drags_out() {
+    // No separate drag handle anywhere in the editor; dragging starts from
+    // Copy, whose hover hint says so.
     let s = state();
     let ui = EditorUi::new(&Config::default());
-    for (w, h) in [(660., 390.), (940., 612.), (1920., 1080.)] {
+    for (w, h) in [(660., 390.), (940., 612.)] {
+        for y in (0..h as i32).step_by(4) {
+            for x in (0..w as i32).step_by(4) {
+                let a = ui.hit(Point::new(x as f32, y as f32), w, h, &s);
+                assert_ne!(a, Some(Action::DragOut), "{x},{y}");
+            }
+        }
         assert_eq!(
-            ui.hit(Point::new(w - 50., h - 22.), w, h, &s),
-            Some(Action::DragOut),
-            "{w}x{h}"
+            ui.hit(Point::new(w - 270., 30.), w, h, &s),
+            Some(Action::Button(22)),
+            "Copy at {w}x{h}"
         );
     }
 }

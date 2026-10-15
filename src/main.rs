@@ -159,6 +159,12 @@ struct App {
     last_region: Option<capture::ScreenRect>,
     /// Set by the repeat shortcut and taken by the next capture.
     repeat_region: Option<capture::ScreenRect>,
+    /// Where Copy was pressed: a click copies, a drag drops a file.
+    copy_press: Option<Point>,
+    /// Space is held in the editor: left-drag pans.
+    space_held: bool,
+    /// The held Space was used to pan, so releasing it does not fit.
+    space_panned: bool,
     registered_hotkey: Option<String>,
     /// Set once the working set has been trimmed for the current tray-idle period.
     idle_trimmed: bool,
@@ -249,6 +255,9 @@ impl App {
             registered_repeat_hotkey: None,
             last_region: None,
             repeat_region: None,
+            copy_press: None,
+            space_held: false,
+            space_panned: false,
             registered_hotkey: None,
             idle_trimmed: false,
             pinned_windows: Vec::new(),
@@ -620,6 +629,21 @@ impl App {
         if self.registered_hotkey.as_deref() == Some(requested.as_str()) {
             return;
         }
+        // UL's own repeat shortcut must not block choosing that combination
+        // for capture; the repeat shortcut is derived again afterwards.
+        let same = |a: &str, b: &str| {
+            let parse = snipping_tool_ul::hotkey::parse_binding;
+            parse(a).is_ok() && parse(a) == parse(b)
+        };
+        if self
+            .registered_repeat_hotkey
+            .as_deref()
+            .is_some_and(|repeat| same(repeat, &requested))
+        {
+            self._repeat_hotkey_manager = None;
+            self.repeat_hotkey_id = None;
+            self.registered_repeat_hotkey = None;
+        }
         let mut failure = String::new();
         for candidate in [requested.as_str(), "Ctrl+Shift+S"] {
             match snipping_tool_ul::hotkey::register_hotkey(candidate) {
@@ -705,6 +729,9 @@ impl App {
             }
         }
         self.editor_ui.header.repeat_hotkey = self.registered_repeat_hotkey.clone();
+        if let Some(tray) = &self.tray {
+            tray.update_repeat_hotkey(self.registered_repeat_hotkey.as_deref());
+        }
         if let Some(home) = &mut self.launcher {
             home.model.repeat_hotkey = self.registered_repeat_hotkey.clone();
             home.window.request_redraw();
@@ -1216,6 +1243,9 @@ impl App {
     }
 
     fn close_overlay(&mut self) {
+        self.copy_press = None;
+        self.space_held = false;
+        self.space_panned = false;
         self.is_preview = false;
         self.native_surface = None;
         self.editor_ui.release_frame_cache();
@@ -1790,6 +1820,8 @@ impl App {
                 if event.id == tray.capture_id {
                     tracing::info!("Capture menu item clicked");
                     self.trigger_capture(event_loop);
+                } else if event.id == tray.repeat_id {
+                    self.trigger_repeat_capture(event_loop);
                 } else if event.id == tray.window_capture_id {
                     tracing::info!("Window capture menu item clicked");
                     let previous_mode = self.capture_mode;
@@ -1893,16 +1925,14 @@ impl App {
         self.editor_ui.draw_base(frame, dpi as f32);
         self.preview_renderer
             .draw(overlay, frame, &self.editor_view, dpi);
-        let zoom = self
-            .editor_view
-            .framed_layout(
-                overlay.screenshot.width,
-                overlay.screenshot.height,
-                size.width,
-                size.height,
-                dpi,
-            )
-            .scale;
+        let layout = self.editor_view.framed_layout(
+            overlay.screenshot.width,
+            overlay.screenshot.height,
+            size.width,
+            size.height,
+            dpi,
+        );
+        let zoom = layout.scale;
         self.editor_ui
             .draw_controls(frame, dpi as f32, overlay, zoom);
         // draw_base repaints every pixel next frame, so the frame can be
@@ -2232,6 +2262,8 @@ impl ApplicationHandler<UserEvent> for App {
                         "No emails, long numbers or keys found".to_string()
                     }
                     Ok(areas) => {
+                        // Indices below assume no text is mid-edit.
+                        o.commit_text();
                         let block = o.pixelate_tool.block_size().max(10);
                         let count = areas.len();
                         o.add_annotations(
@@ -2268,6 +2300,8 @@ impl ApplicationHandler<UserEvent> for App {
                 if revision == self.image_revision {
                     if let AppState::Capturing(ref mut o) = self.state {
                         o.clipboard_copy = Some((annotations, sequence));
+                        self.editor_ui.header.flash_until =
+                            Some(Instant::now() + Duration::from_millis(700));
                         self.needs_redraw = true;
                     }
                 }
@@ -3064,9 +3098,14 @@ impl ApplicationHandler<UserEvent> for App {
                 match &event {
                     WindowEvent::MouseInput {
                         state: ElementState::Pressed,
-                        button: WinitMouseButton::Middle,
+                        button,
                         ..
-                    } => {
+                    } if *button == WinitMouseButton::Middle
+                        || (*button == WinitMouseButton::Left && self.space_held) =>
+                    {
+                        if *button == WinitMouseButton::Left {
+                            self.space_panned = true;
+                        }
                         if !self.editor_pointer_down
                             && !o.text_input_active
                             && !self.editor_ui.size_dragging
@@ -3084,15 +3123,26 @@ impl ApplicationHandler<UserEvent> for App {
                             window.set_cursor(CursorIcon::Grabbing);
                             self.needs_redraw = true;
                         }
-                        consumed = true;
+                        // Space+click outside the image (toolbar, Copy)
+                        // still reaches the control under the pointer.
+                        consumed =
+                            *button == WinitMouseButton::Middle || self.editor_view.is_panning();
                     }
                     WindowEvent::MouseInput {
                         state: ElementState::Released,
-                        button: WinitMouseButton::Middle,
+                        button,
                         ..
-                    } => {
+                    } if *button == WinitMouseButton::Middle
+                        || (*button == WinitMouseButton::Left
+                            && self.space_held
+                            && self.editor_view.is_panning()) =>
+                    {
                         self.editor_view.end_pan();
-                        window.set_cursor(determine_cursor(o, o.last_mouse_pos, true, hit_slop));
+                        window.set_cursor(if self.space_held {
+                            CursorIcon::Grab
+                        } else {
+                            determine_cursor(o, o.last_mouse_pos, true, hit_slop)
+                        });
                         consumed = true;
                     }
                     WindowEvent::CursorMoved { position, .. } if self.editor_view.is_panning() => {
@@ -3110,7 +3160,14 @@ impl ApplicationHandler<UserEvent> for App {
                         window.set_cursor(CursorIcon::Grabbing);
                         consumed = true;
                     }
+                    // Another app may have copied meanwhile: refresh Copied/Copy.
+                    WindowEvent::Focused(true) => self.needs_redraw = true,
                     WindowEvent::Focused(false) | WindowEvent::CursorLeft { .. } => {
+                        if matches!(event, WindowEvent::Focused(false)) {
+                            self.copy_press = None;
+                            self.space_held = false;
+                            self.space_panned = false;
+                        }
                         self.editor_ui.cancel_new_capture();
                         if self.editor_view.end_pan() {
                             window.set_cursor(CursorIcon::Default);
@@ -3192,6 +3249,15 @@ impl ApplicationHandler<UserEvent> for App {
                         state: ElementState::Released,
                         button: WinitMouseButton::Left,
                         ..
+                    } if self.copy_press.is_some() => {
+                        self.copy_press = None;
+                        requested = Some(HomeAction::Button(22));
+                        consumed = true;
+                    }
+                    WindowEvent::MouseInput {
+                        state: ElementState::Released,
+                        button: WinitMouseButton::Left,
+                        ..
                     } if self.editor_ui.size_dragging => {
                         self.editor_ui.end_size_drag(o);
                         consumed = true;
@@ -3204,6 +3270,14 @@ impl ApplicationHandler<UserEvent> for App {
                     WindowEvent::CursorMoved { position, .. } => {
                         self.editor_pointer = (position.x, position.y);
                         let p = Point::new((position.x / dpi) as f32, (position.y / dpi) as f32);
+                        // Pressing Copy and moving away drags the image out.
+                        if let Some(start) = self.copy_press {
+                            if (p.x - start.x).hypot(p.y - start.y) > 6. {
+                                self.copy_press = None;
+                                requested = Some(HomeAction::DragOut);
+                            }
+                            consumed = true;
+                        }
                         if self.editor_ui.size_dragging {
                             requested =
                                 snipping_tool_ul::editor_ui::EditorUi::slider_value(p, w, h, o);
@@ -3284,6 +3358,8 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                             if a == HomeAction::New {
                                 self.editor_ui.arm_new_capture();
+                            } else if a == HomeAction::Button(22) {
+                                self.copy_press = Some(p);
                             } else if self.editor_ui.activate(a) {
                                 self.needs_redraw = true;
                             } else {
@@ -3473,6 +3549,42 @@ impl ApplicationHandler<UserEvent> for App {
             }
 
             WindowEvent::KeyboardInput { event, .. } => {
+                // Hold Space and drag to pan; a tap without dragging fits the
+                // image (Select tool), as Space alone always did.
+                // A held Space always ends on release, even if text editing
+                // began meanwhile; only a new press defers to text input.
+                if self.is_preview
+                    && event.logical_key == Key::Named(NamedKey::Space)
+                    && (self.space_held || !overlay.text_input_active)
+                {
+                    if event.state == ElementState::Pressed {
+                        if !self.space_held && self.modifiers.is_empty() {
+                            self.space_held = true;
+                            self.space_panned = false;
+                            if let Some(w) = &self.overlay_window {
+                                w.set_cursor(CursorIcon::Grab);
+                            }
+                        }
+                        return;
+                    }
+                    if std::mem::take(&mut self.space_held) {
+                        self.editor_view.end_pan();
+                        let tapped = !std::mem::take(&mut self.space_panned);
+                        if tapped
+                            && !self.editor_pointer_down
+                            && self.editor_ui.size_draft.is_none()
+                            && self.editor_ui.header.menu == snipping_tool_ul::launcher::Menu::None
+                        {
+                            self.editor_view.recenter_for_select(overlay);
+                        }
+                        self.needs_redraw = true;
+                        if let Some(w) = &self.overlay_window {
+                            w.set_cursor(CursorIcon::Default);
+                            w.request_redraw();
+                        }
+                    }
+                    return;
+                }
                 if event.state != ElementState::Pressed {
                     return;
                 }
@@ -3483,20 +3595,6 @@ impl ApplicationHandler<UserEvent> for App {
                     && !overlay.text_input_active
                 {
                     self.editor_view = Default::default();
-                    self.needs_redraw = true;
-                    if let Some(w) = &self.overlay_window {
-                        w.request_redraw();
-                    }
-                    return;
-                }
-                if self.is_preview
-                    && event.logical_key == Key::Named(NamedKey::Space)
-                    && self.modifiers.is_empty()
-                    && !self.editor_pointer_down
-                    && self.editor_ui.size_draft.is_none()
-                    && self.editor_ui.header.menu == snipping_tool_ul::launcher::Menu::None
-                    && self.editor_view.recenter_for_select(overlay)
-                {
                     self.needs_redraw = true;
                     if let Some(w) = &self.overlay_window {
                         w.request_redraw();
@@ -4356,6 +4454,13 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
 
+        let now = Instant::now();
+        // The Copy flash ends with one more frame.
+        if self.editor_ui.header.flash_until.is_some_and(|t| t <= now) {
+            self.editor_ui.header.flash_until = None;
+            self.needs_redraw = true;
+        }
+
         // Frame rate cap: only render if enough time has passed since last frame
         if self.needs_redraw {
             let now = Instant::now();
@@ -4381,6 +4486,7 @@ impl ApplicationHandler<UserEvent> for App {
             self.countdown.as_ref().map(|cd| cd.next_tick()),
             self.capture_at,
             toast,
+            self.editor_ui.header.flash_until,
             self.needs_redraw
                 .then_some(self.last_render + FRAME_INTERVAL),
             self.settings_window

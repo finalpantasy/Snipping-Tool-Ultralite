@@ -4,6 +4,9 @@ use tray_icon::{Icon, TrayIconBuilder};
 pub struct TrayState {
     pub capture_id: tray_icon::menu::MenuId,
     capture_item: MenuItem,
+    /// Snips the previous area again; disabled until its shortcut exists.
+    pub repeat_id: tray_icon::menu::MenuId,
+    repeat_item: MenuItem,
     pub window_capture_id: tray_icon::menu::MenuId,
     pub delay_3_id: tray_icon::menu::MenuId,
     pub delay_5_id: tray_icon::menu::MenuId,
@@ -28,6 +31,7 @@ pub fn create_tray() -> Result<TrayState, String> {
     // Create menu with Capture, About, Quit
     let menu = Menu::new();
     let capture_item = MenuItem::new("Capture screenshot", true, None);
+    let repeat_item = MenuItem::new("Snip same area again", true, None);
     let window_capture_item = MenuItem::new("Capture Window", true, None);
     let delay_3_item = MenuItem::new("Capture in 3s", true, None);
     let delay_5_item = MenuItem::new("Capture in 5s", true, None);
@@ -39,6 +43,7 @@ pub fn create_tray() -> Result<TrayState, String> {
     let about_item = MenuItem::new("About", true, None);
     let quit_item = MenuItem::new("Quit", true, None);
     let capture_id = capture_item.id().clone();
+    let repeat_id = repeat_item.id().clone();
     let window_capture_id = window_capture_item.id().clone();
     let delay_3_id = delay_3_item.id().clone();
     let delay_5_id = delay_5_item.id().clone();
@@ -49,6 +54,7 @@ pub fn create_tray() -> Result<TrayState, String> {
     let about_id = about_item.id().clone();
     let quit_id = quit_item.id().clone();
     menu.append(&capture_item).map_err(|e| e.to_string())?;
+    menu.append(&repeat_item).map_err(|e| e.to_string())?;
     menu.append(&window_capture_item)
         .map_err(|e| e.to_string())?;
     menu.append(&delay_3_item).map_err(|e| e.to_string())?;
@@ -71,6 +77,8 @@ pub fn create_tray() -> Result<TrayState, String> {
     Ok(TrayState {
         capture_id,
         capture_item,
+        repeat_id,
+        repeat_item,
         window_capture_id,
         delay_3_id,
         delay_5_id,
@@ -97,6 +105,13 @@ impl TrayState {
         self.menu.prepend(&item).map_err(|e| e.to_string())?;
         self.update_id = Some(item.id().clone());
         Ok(())
+    }
+
+    pub fn update_repeat_hotkey(&self, hotkey: Option<&str>) {
+        self.repeat_item.set_text(match hotkey {
+            Some(binding) => format!("Snip same area again\t{binding}"),
+            None => "Snip same area again".into(),
+        });
     }
 
     pub fn update_capture_hotkey(&self, hotkey: Option<&str>) {

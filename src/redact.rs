@@ -103,14 +103,30 @@ fn number_part(text: &str) -> Option<usize> {
     (ok && digits > 0).then_some(digits)
 }
 
-/// Dates such as 2026-10-14 or 14/10/2026 are not private.
+/// Dates such as 2026-10-14 or 14/10/2026 are not private: a four-digit
+/// year first or last, and a month and day of one or two digits in range.
+/// Phone numbers like 555-123-4567 do not fit that shape.
 fn is_date(text: &str) -> bool {
     let parts: Vec<&str> = core(text).split(['-', '/', '.']).collect();
-    parts.len() == 3
-        && parts
+    if parts.len() != 3
+        || !parts
             .iter()
-            .all(|p| !p.is_empty() && p.len() <= 4 && p.chars().all(|c| c.is_ascii_digit()))
-        && parts.iter().any(|p| p.len() == 4)
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+    {
+        return false;
+    }
+    let (a, b) = match (parts[0].len(), parts[2].len()) {
+        (4, 1..=2) => (parts[1], parts[2]),
+        (1..=2, 4) => (parts[0], parts[1]),
+        _ => return false,
+    };
+    if a.len() > 2 || b.len() > 2 {
+        return false;
+    }
+    let (Ok(a), Ok(b)) = (a.parse::<u32>(), b.parse::<u32>()) else {
+        return false;
+    };
+    (1..=31).contains(&a) && (1..=31).contains(&b) && (a <= 12 || b <= 12)
 }
 
 /// Areas to pixelate. Number runs may span several words on one line
@@ -195,12 +211,16 @@ mod tests {
             [(0., 390.)]
         );
         assert_eq!(found(&line(0, &["Server", "192.168.1.100"])), [(100., 90.)]);
+        // Dashed and dotted phone numbers are not dates.
+        assert_eq!(found(&line(0, &["Tel", "555-123-4567"])), [(100., 90.)]);
+        assert_eq!(found(&line(0, &["Tel", "555.123.4567"])), [(100., 90.)]);
     }
 
     #[test]
     fn leaves_ordinary_text_dates_and_short_numbers() {
         for words in [
             line(0, &["Meeting", "on", "2026-10-14", "at", "10"]),
+            line(0, &["Due", "14/10/2026", "or", "10.14.2026"]),
             line(0, &["Version", "0.3.26", "preview"]),
             line(0, &["Total:", "$1,234"]),
             line(0, &["https://example.com/docs/page"]),

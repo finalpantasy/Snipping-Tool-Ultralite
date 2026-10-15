@@ -33,9 +33,6 @@ fn get_svg(name: &str) -> Option<String> {
             r#"<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>"#
         }
         "check" => r#"<path d="m5 13 4 4L19 7"/>"#,
-        "grip" => {
-            r#"<circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/>"#
-        }
         "close" => r#"<path d="M6 6l12 12M18 6 6 18"/>"#,
         "window" => r#"<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/>"#,
         "screen" => {

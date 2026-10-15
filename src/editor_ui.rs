@@ -319,8 +319,6 @@ impl EditorUi {
                 ));
             }
         }
-        // The size label doubles as the drag handle.
-        t.push(Target::new(w - 116., h - 33., 104., 28., Action::DragOut));
         t.extend([
             Target::new(tx + 442., ty + 7., 48., 46., Action::ToggleColors),
             Target::new(tx + 498., ty + 7., 48., 46., Action::ToggleTools),
@@ -638,20 +636,11 @@ impl EditorUi {
         let bounds = state.editor_canvas_bounds();
         let size = format!("{:.0} x {:.0}", bounds.width, bounds.height);
         let tw = ui::measure(&size, 11. * dpi) / dpi;
-        if self.header.hovered == Some(Action::DragOut) {
-            c.round(
-                Rect::new(w - 42. - tw, h - 31., tw + 30., 24.),
-                6.,
-                ui::muted(),
-                0.12,
-            );
-        }
-        c.icon("grip", w - 38. - tw, h - 25., 12., ui::muted());
         c.label(w - 22. - tw, h - 25., &size, 11., ui::muted());
         let help = if state.active_tool == crate::tools::ToolKind::Select {
-            "Scroll to zoom · Middle-drag to pan · Space to fit"
+            "Scroll to zoom · Space+drag to pan · Tap Space to fit"
         } else {
-            "Scroll to zoom · Middle-drag to pan"
+            "Scroll to zoom · Space+drag to pan"
         };
         let hw = ui::measure(help, 10.5 * dpi) / dpi;
         let status_w = if status.trim().is_empty() {
@@ -660,8 +649,8 @@ impl EditorUi {
             42. + ui::measure(status, 11. * dpi) / dpi
         };
         // Drop the help rather than let it collide with a long status.
-        if w - 22. - tw - 40. - hw > status_w + 24. {
-            c.label(w - 22. - tw - 40. - hw, h - 24.5, help, 10.5, ui::muted());
+        if w - 22. - tw - 24. - hw > status_w + 24. {
+            c.label(w - 22. - tw - 24. - hw, h - 24.5, help, 10.5, ui::muted());
         }
         if self.header.menu == Menu::Annotation {
             let targets = self.targets(w, h, state);
@@ -792,7 +781,6 @@ impl EditorUi {
                         Action::ToggleColors => "Choose the annotation color",
                         Action::ToggleTools => "More annotations, extract text, and pin",
                         Action::ResetZoom => "Reset zoom to fit the window (Ctrl+0)",
-                        Action::DragOut => "Drag into another app to drop the image as a file",
                         Action::Redact => {
                             "Pixelate emails, long numbers and keys found in the image"
                         }

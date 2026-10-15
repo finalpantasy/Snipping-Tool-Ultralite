@@ -11,18 +11,32 @@ fn drag_path(dir: &Path, stamp: u128) -> PathBuf {
     dir.join(format!("{PREFIX}{}_{stamp}.png", std::process::id()))
 }
 
-/// Removes earlier drag files from `dir`, keeping `keep`.
+/// Removes this process's earlier drag files from `dir`, keeping `keep`.
+/// Another process's files are left alone unless a day old (abandoned by a
+/// crash), since a receiver may still be reading them.
 pub fn remove_old_files(dir: &Path, keep: Option<&Path>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
+    let own = format!("{PREFIX}{}_", std::process::id());
+    let day = std::time::Duration::from_secs(24 * 60 * 60);
     for entry in entries.flatten() {
         let path = entry.path();
-        let ours = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.starts_with(PREFIX) && n.ends_with(".png"));
-        if ours && Some(path.as_path()) != keep {
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !name.starts_with(PREFIX) || !name.ends_with(".png") || Some(path.as_path()) == keep {
+            continue;
+        }
+        let stale = || {
+            entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .is_some_and(|age| age > day)
+        };
+        if name.starts_with(&own) || stale() {
             let _ = std::fs::remove_file(&path);
         }
     }
@@ -99,6 +113,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let unrelated = dir.join("keep-me.png");
         std::fs::write(&unrelated, b"x").unwrap();
+        // A fresh drag file from another running instance must survive.
+        let other = dir.join(format!("{PREFIX}{}_1.png", std::process::id() + 1));
+        std::fs::write(&other, b"x").unwrap();
         let pixels = [255u8, 0, 0, 255].repeat(4);
         let first = write_drag_file(&dir, &pixels, 2, 2).unwrap();
         let second = write_drag_file(&dir, &pixels, 2, 2).unwrap();
@@ -107,8 +124,10 @@ mod tests {
         let bytes = std::fs::read(&second).unwrap();
         assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
         assert!(unrelated.exists());
+        assert!(other.exists(), "another instance's drag file was removed");
         remove_old_files(&dir, None);
         assert!(!second.exists());
+        assert!(other.exists());
         assert!(write_drag_file(&dir, &pixels, 3, 2).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -252,6 +252,32 @@ fn readout_position(
     (x, y.min(bottom - h).max(bounds.y))
 }
 
+/// The monitor holding the selection's bottom-right corner.
+unsafe fn monitor_of(rect: ScreenRect) -> Option<ScreenRect> {
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
+    let corner = POINT {
+        x: rect.x + rect.width as i32 - 1,
+        y: rect.y + rect.height as i32 - 1,
+    };
+    let monitor = MonitorFromPoint(corner, MONITOR_DEFAULTTONEAREST);
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    if !GetMonitorInfoW(monitor, &mut info).as_bool() {
+        return None;
+    }
+    let r = info.rcMonitor;
+    Some(ScreenRect {
+        x: r.left,
+        y: r.top,
+        width: (r.right - r.left).max(0) as u32,
+        height: (r.bottom - r.top).max(0) as u32,
+    })
+}
+
 unsafe fn show_readout(readout: HWND, rect: ScreenRect, bounds: ScreenRect) {
     if readout.is_invalid() {
         return;
@@ -273,7 +299,10 @@ unsafe fn show_readout(readout: HWND, rect: ScreenRect, bounds: ScreenRect) {
     }
     let pad = extent.cy / 2;
     let size = (extent.cx + pad * 2, extent.cy + pad);
-    let (x, y) = readout_position(rect, bounds, size, pad / 2 + 2);
+    let screen = monitor_of(rect)
+        .and_then(|m| m.intersect(bounds))
+        .unwrap_or(bounds);
+    let (x, y) = readout_position(rect, screen, size, pad / 2 + 2);
     text.push(0);
     let _ = SetWindowTextW(readout, windows::core::PCWSTR(text.as_ptr()));
     let _ = SetWindowPos(

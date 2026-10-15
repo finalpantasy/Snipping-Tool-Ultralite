@@ -112,6 +112,8 @@ pub struct Model {
     pub copied: bool,
     /// Shortcut that snips the previous area again, when registered.
     pub repeat_hotkey: Option<String>,
+    /// Copy finished just now: the button flashes until this moment.
+    pub flash_until: Option<std::time::Instant>,
 }
 impl Model {
     pub fn new(workflow: WorkflowConfig, hotkey: String) -> Self {
@@ -134,6 +136,7 @@ impl Model {
             update: None,
             copied: false,
             repeat_hotkey: None,
+            flash_until: None,
         }
     }
     /// The empty launcher is a command strip, not an unused image canvas.
@@ -448,12 +451,16 @@ impl Model {
             h(Action::ToggleDelay),
         );
         if editor {
-            // Copy stands out while the clipboard lacks the image as shown.
+            // Copy stands out while the clipboard lacks the image as shown,
+            // and flashes briefly when a copy lands.
+            let flash = self
+                .flash_until
+                .is_some_and(|t| t > std::time::Instant::now());
             c.button(
                 Rect::new(w - 309., 15., 82., 32.),
                 if self.copied { "Copied" } else { "Copy" },
                 Some(if self.copied { "check" } else { "copy" }),
-                !self.copied,
+                !self.copied || flash,
                 h(Action::Button(22)),
                 true,
             );
@@ -779,8 +786,10 @@ impl Model {
                 Action::ToggleDelay => "Wait before starting a capture",
                 Action::Upload => "Upload publicly and copy a share link",
                 Action::ToggleOptions => "Capture preferences, sharing, and settings",
-                Action::Button(22) if self.copied => "The clipboard has this image as shown",
-                Action::Button(22) => "Copy image with annotations (Ctrl+C)",
+                Action::Button(22) if self.copied => {
+                    "Copied as shown. Drag this button into an app to drop a file"
+                }
+                Action::Button(22) => "Click to copy (Ctrl+C), or drag into an app to drop a file",
                 Action::Button(23) => "Save image with annotations (Ctrl+S)",
                 _ => return,
             };
