@@ -101,6 +101,7 @@ fn main() {
         assert!(ratio >= 4.5, "Body labels must remain readable: {ratio}");
         println!("{name}: secondary text worst-case solid backdrop contrast {ratio:.2}:1");
         let mut home = Model::new(cfg.workflow.clone(), cfg.hotkey.capture.clone());
+        home.repeat_hotkey = snipping_tool_ul::hotkey::repeat_binding(&cfg.hotkey.capture);
         for (menu, label) in [
             (Menu::None, "home"),
             (Menu::Options, "home-options"),

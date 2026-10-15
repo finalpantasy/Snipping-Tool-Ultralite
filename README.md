@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.26-preview/Snipping-Tool-UL-0.3.26-Windows-x64.zip"><b>Download for Windows</b></a>
+  <a href="https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.27-preview/Snipping-Tool-UL-0.3.27-Windows-x64.zip"><b>Download for Windows</b></a>
   &nbsp;·&nbsp; <a href="docs/USAGE.md">User guide</a>
   &nbsp;·&nbsp; <a href="CHANGELOG.md">What's new</a>
 </p>
@@ -48,7 +48,9 @@ Flameshot asks which monitor to use before every snip on a PC with more than one
 | Freezes the screen while you choose | Text, numbered steps, blur (pixelate) | Save as a full-quality image |
 | 3, 5 or 10 second timer | Undo, redo, zoom in and out | One-click shareable link |
 | Pick your own shortcut keys | Draw past the edges and the picture grows | Pin a snip on top of other windows |
-| Light and dark mode | Copy the text out of any snip | Optional history and auto-save |
+| Snip the same area again with one shortcut | Hide emails, phone numbers and keys in one click | Drag the snip straight into another app |
+| Exact size shown while you select | Copy the text out of any snip | Optional history and auto-save |
+| Light and dark mode | Hold Space and drag to move around | Copy button shows when the clipboard has your snip |
 
 <details>
 <summary><b>More screenshots</b></summary>
@@ -62,7 +64,7 @@ Flameshot asks which monitor to use before every snip on a PC with more than one
 
 ## Get started in 30 seconds
 
-1. [Download the ZIP](https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.26-preview/Snipping-Tool-UL-0.3.26-Windows-x64.zip) and unzip it anywhere.
+1. [Download the ZIP](https://github.com/finalpantasy/Snipping-Tool-Ultralite/releases/download/v0.3.27-preview/Snipping-Tool-UL-0.3.27-Windows-x64.zip) and unzip it anywhere.
 2. Double-click `snipping-tool-ul.exe`.
 3. Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>, drag over what you want, and paste.
 
@@ -109,7 +111,7 @@ cargo test --locked
 
 ## Status
 
-0.3.26 is a preview release. Not yet verified: monitors with mixed scaling, live uploads to every host, and memory use over very long sessions. [Release checks](docs/VERIFICATION-0.3.26.md)
+0.3.27 is a preview release. Not yet verified: monitors with mixed scaling, live uploads to every host, and memory use over very long sessions. [Release checks](docs/VERIFICATION-0.3.27.md)
 
 Found a bug? [Open an issue](https://github.com/finalpantasy/Snipping-Tool-Ultralite/issues) with your Windows version, display scaling and the steps that cause it.
 

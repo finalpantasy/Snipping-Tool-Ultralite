@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.27 preview
+
+- **Copy knows what is on the clipboard.** The button says *Copied* while the clipboard still holds your snip exactly as shown, and turns back into *Copy* after you edit or another app copies something. It flashes briefly when a copy lands.
+- **Drag your snip into other apps.** Press **Copy** and drag into Explorer, a chat or an email to drop the image as a PNG file; a plain click still copies. On a pinned snip, Ctrl+drag does the same.
+- **Snip the same area again** with the capture shortcut plus Alt (Ctrl+Shift+Alt+S by default), or from the tray menu. No picker; if that area is no longer on screen, the picker opens instead. The shortcut never takes a Windows combination such as Alt+F4.
+- **Size while you select.** The picker shows the exact size of your selection in pixels.
+- **Hide private info** (Tools menu): finds email addresses, phone, card and account numbers, IP addresses and key-like tokens with Windows' built-in text recognition and pixelates them in one undoable step. Dates, times, prices and ordinary text are left alone. Check the result before sharing.
+- **Hold Space and click-drag to pan**, for trackpads without a middle button. Tapping Space still fits the image with the Select tool.
+- Cleaner editor: the snip sits on the frosted workspace with a thin edge and soft shadow, there is one hint line instead of two, and navigation help moved to the status row. The home window hides Upload until there is something to upload.
+- The image reaches the clipboard sooner: 42 ms instead of 50 ms in a live test on three 4K monitors.
+
 ## 0.3.26 preview
 
 - Faster snips: the screen is captured once and drawn as it is, and only the area you select is converted. In a live test on three 4K monitors, the selection screen appeared in 141 ms instead of 241 ms, and the image reached the clipboard in 54 ms instead of 83 ms, on the same busy PC.

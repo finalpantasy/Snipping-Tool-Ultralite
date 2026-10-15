@@ -2,7 +2,7 @@
 
 Component measurements from October 12-13, 2026, and capture, startup and memory comparisons with Microsoft's Snipping Tool, ShareX, Greenshot and Flameshot from October 14, 2026.
 
-[Download and overview](../README.md) | [Release verification](VERIFICATION-0.3.26.md)
+[Download and overview](../README.md) | [Release verification](VERIFICATION-0.3.27.md)
 
 ## Results at a glance
 
