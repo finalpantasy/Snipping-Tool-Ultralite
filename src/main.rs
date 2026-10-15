@@ -711,9 +711,22 @@ impl App {
             .registered_hotkey
             .as_deref()
             .and_then(snipping_tool_ul::hotkey::repeat_binding);
-        if wanted == self.registered_repeat_hotkey {
-            return;
+        if wanted != self.registered_repeat_hotkey {
+            self.register_repeat_binding(wanted);
         }
+        // Labels follow even when nothing re-registered: register_hotkey
+        // may have released the repeat binding for the capture shortcut.
+        self.editor_ui.header.repeat_hotkey = self.registered_repeat_hotkey.clone();
+        if let Some(tray) = &self.tray {
+            tray.update_repeat_hotkey(self.registered_repeat_hotkey.as_deref());
+        }
+        if let Some(home) = &mut self.launcher {
+            home.model.repeat_hotkey = self.registered_repeat_hotkey.clone();
+            home.window.request_redraw();
+        }
+    }
+
+    fn register_repeat_binding(&mut self, wanted: Option<String>) {
         // Unregister the old combination before the new one is tried.
         self._repeat_hotkey_manager = None;
         self.repeat_hotkey_id = None;
@@ -728,21 +741,14 @@ impl App {
                 Err(e) => tracing::warn!("Repeat shortcut {binding} unavailable: {e}"),
             }
         }
-        self.editor_ui.header.repeat_hotkey = self.registered_repeat_hotkey.clone();
-        if let Some(tray) = &self.tray {
-            tray.update_repeat_hotkey(self.registered_repeat_hotkey.as_deref());
-        }
-        if let Some(home) = &mut self.launcher {
-            home.model.repeat_hotkey = self.registered_repeat_hotkey.clone();
-            home.window.request_redraw();
-        }
     }
 
     /// Snip the previous area again: same pixels on screen, no picker. With
     /// no previous snip this is an ordinary capture.
-    fn trigger_repeat_capture(&mut self, event_loop: &ActiveEventLoop) {
+    /// `flush`: UL just changed the screen (the tray menu), as in start_capture.
+    fn trigger_repeat_capture(&mut self, event_loop: &ActiveEventLoop, flush: bool) {
         self.repeat_region = self.last_region;
-        self.start_capture(event_loop, false);
+        self.start_capture(event_loop, flush);
         self.repeat_region = None;
     }
 
@@ -1821,7 +1827,8 @@ impl App {
                     tracing::info!("Capture menu item clicked");
                     self.trigger_capture(event_loop);
                 } else if event.id == tray.repeat_id {
-                    self.trigger_repeat_capture(event_loop);
+                    // The tray menu was just on screen; let it disappear first.
+                    self.trigger_repeat_capture(event_loop, true);
                 } else if event.id == tray.window_capture_id {
                     tracing::info!("Window capture menu item clicked");
                     let previous_mode = self.capture_mode;
@@ -2409,7 +2416,7 @@ impl ApplicationHandler<UserEvent> for App {
                 } else if event.state == global_hotkey::HotKeyState::Pressed
                     && Some(event.id) == self.repeat_hotkey_id
                 {
-                    self.trigger_repeat_capture(event_loop);
+                    self.trigger_repeat_capture(event_loop, false);
                 }
             }
             UserEvent::ShowHome => self.show_home(event_loop),
@@ -3568,9 +3575,14 @@ impl ApplicationHandler<UserEvent> for App {
                         return;
                     }
                     if std::mem::take(&mut self.space_held) {
-                        self.editor_view.end_pan();
-                        let tapped = !std::mem::take(&mut self.space_panned);
-                        if tapped
+                        // Only a Space pan ends here; a middle-button pan
+                        // keeps going, and no fit happens during it.
+                        let panned = std::mem::take(&mut self.space_panned);
+                        if panned {
+                            self.editor_view.end_pan();
+                        }
+                        if !panned
+                            && !self.editor_view.is_panning()
                             && !self.editor_pointer_down
                             && self.editor_ui.size_draft.is_none()
                             && self.editor_ui.header.menu == snipping_tool_ul::launcher::Menu::None
@@ -4403,7 +4415,7 @@ impl ApplicationHandler<UserEvent> for App {
             } else if event.state == global_hotkey::HotKeyState::Pressed
                 && Some(event.id) == self.repeat_hotkey_id
             {
-                self.trigger_repeat_capture(event_loop);
+                self.trigger_repeat_capture(event_loop, false);
             }
         }
 

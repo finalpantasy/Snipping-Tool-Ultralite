@@ -410,8 +410,16 @@ pub fn copy_with_ticket_sequence(
     // published with bounded busy retries.
     #[cfg(windows)]
     let copied = crate::clipboard_queue::run(ticket, || {
-        crate::clipboard_image::write(pixels, width, height)?;
-        sequence = clipboard_sequence();
+        let inside = crate::clipboard_image::write(pixels, width, height)?;
+        // Windows may count the change when the clipboard closes. One step
+        // past the value read inside is still UL's copy; more means another
+        // app wrote in between, so the copy is not claimed (Copy stays shown).
+        let after = clipboard_sequence();
+        sequence = if after.wrapping_sub(inside) <= 1 {
+            after
+        } else {
+            0
+        };
         Ok(())
     })?;
     #[cfg(not(windows))]
@@ -429,6 +437,7 @@ pub fn copy_with_ticket_sequence(
             .set_image(img)
             .map_err(|e| format!("Failed to copy image to clipboard: {e}"))
     })?;
+    // Sequence 0 marks an unconfirmed copy: it still succeeded.
     Ok(copied.then_some(sequence))
 }
 

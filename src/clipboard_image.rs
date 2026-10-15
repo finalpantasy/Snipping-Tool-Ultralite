@@ -176,7 +176,9 @@ mod win {
 
     /// Publish PNG first (some apps take the first format they recognise),
     /// then CF_DIBV5 for apps that only read bitmaps.
-    pub fn write(pixels: &[u8], width: u32, height: u32) -> Result<(), String> {
+    /// Returns the clipboard sequence number read while UL still holds the
+    /// clipboard open, after publishing.
+    pub fn write(pixels: &[u8], width: u32, height: u32) -> Result<u32, String> {
         // EXPERIMENT, remove before release: the upper bound of what delayed
         // PNG rendering could save, measured by the nightly A/B run.
         if std::env::var_os("SNIPPING_TOOL_UL_EXPERIMENT_DIB_ONLY").is_some() {
@@ -188,7 +190,10 @@ mod win {
             let _clipboard = OpenedClipboard::open()?;
             unsafe { EmptyClipboard() }
                 .map_err(|e| format!("Failed to empty the clipboard: {e}"))?;
-            return dib.publish(CF_DIBV5);
+            dib.publish(CF_DIBV5)?;
+            return Ok(unsafe {
+                windows::Win32::System::DataExchange::GetClipboardSequenceNumber()
+            });
         }
         let payload = prepare(pixels, width, height)?;
         let png_format = unsafe { RegisterClipboardFormatW(w!("PNG")) };
@@ -198,7 +203,8 @@ mod win {
         let _clipboard = OpenedClipboard::open()?;
         unsafe { EmptyClipboard() }.map_err(|e| format!("Failed to empty the clipboard: {e}"))?;
         payload.png.publish(png_format)?;
-        payload.dib.publish(CF_DIBV5)
+        payload.dib.publish(CF_DIBV5)?;
+        Ok(unsafe { windows::Win32::System::DataExchange::GetClipboardSequenceNumber() })
     }
 }
 

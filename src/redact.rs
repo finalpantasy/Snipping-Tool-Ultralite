@@ -46,7 +46,7 @@ impl Area {
 
 /// Surrounding punctuation OCR keeps on a word: quotes, brackets, commas.
 fn core(text: &str) -> &str {
-    text.trim_matches(|c: char| "\"'`<>[]{},;:!?".contains(c))
+    text.trim_matches(|c: char| "\"'`<>[](){},;:!?".contains(c))
 }
 
 fn is_email(text: &str) -> bool {
@@ -152,6 +152,13 @@ pub fn private_areas(words: &[Word]) -> Vec<Area> {
         }
         match number_part(&word.text).filter(|_| !is_date(&word.text)) {
             Some(digits) => {
+                // A wide gap or too many digits means a separate number,
+                // such as two phone numbers side by side.
+                if run.is_some_and(|(_, area, total)| {
+                    total + digits > 19 || word.x - (area.x + area.w) > word.h * 1.5
+                }) {
+                    flush(&mut run, &mut areas);
+                }
                 run = Some(match run {
                     Some((line, area, total)) => (line, area.union(Area::of(word)), total + digits),
                     None => (word.line, Area::of(word), digits),
@@ -211,6 +218,16 @@ mod tests {
             [(0., 390.)]
         );
         assert_eq!(found(&line(0, &["Server", "192.168.1.100"])), [(100., 90.)]);
+        // Two numbers side by side are two areas, not one rejected run.
+        assert_eq!(
+            found(&line(0, &["555-123-4567", "555-987-6543"])),
+            [(0., 90.), (100., 90.)]
+        );
+        // Brackets around an address or key do not hide it.
+        assert_eq!(
+            found(&line(0, &["Ask", "(alice@example.com)"])),
+            [(100., 90.)]
+        );
         // Dashed and dotted phone numbers are not dates.
         assert_eq!(found(&line(0, &["Tel", "555-123-4567"])), [(100., 90.)]);
         assert_eq!(found(&line(0, &["Tel", "555.123.4567"])), [(100., 90.)]);

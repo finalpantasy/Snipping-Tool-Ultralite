@@ -97,7 +97,7 @@ impl OverlayState {
     /// Whether the clipboard still holds this image exactly as shown, given
     /// the clipboard's current sequence number. Unfinished text counts as a change.
     pub fn clipboard_current(&self, sequence: u32) -> bool {
-        !(self.text_input_active && !self.text_input_buffer.is_empty())
+        (!self.text_input_active || self.text_input_buffer.is_empty())
             && self
                 .clipboard_copy
                 .as_ref()
