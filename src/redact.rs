@@ -44,13 +44,23 @@ impl Area {
     }
 }
 
-/// Surrounding punctuation OCR keeps on a word: quotes, brackets, commas.
+/// Surrounding punctuation OCR keeps on a word: quotes, brackets, commas and
+/// a sentence's closing full stop.
 fn core(text: &str) -> &str {
-    text.trim_matches(|c: char| "\"'`<>[](){},;:!?".contains(c))
+    text.trim_matches(|c: char| "\"'`<>[](){},;:!?.".contains(c))
+}
+
+/// Pieces of a word between separators, so a token inside a link
+/// ("?token=..."), a quoted setting (KEY="...") or an address with a port
+/// ("203.0.113.7:8080") is tested on its own.
+fn segments(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|c: char| ":?&\"'=/\\<>()[]{};".contains(c))
+        .map(core)
+        .filter(|s| !s.is_empty())
 }
 
 fn is_email(text: &str) -> bool {
-    let text = core(text).trim_end_matches('.');
+    let text = core(text);
     let Some((user, domain)) = text.split_once('@') else {
         return false;
     };
@@ -129,42 +139,98 @@ fn is_date(text: &str) -> bool {
     (1..=31).contains(&a) && (1..=31).contains(&b) && (a <= 12 || b <= 12)
 }
 
+/// Money is not private: a currency sign, or thousands grouped by commas
+/// ("1,234,567.89").
+fn is_amount(text: &str) -> bool {
+    let text = core(text);
+    if text.contains(['$', '€', '£', '¥']) {
+        return true;
+    }
+    let whole = text.split('.').next().unwrap_or("");
+    let groups: Vec<&str> = whole.split(',').collect();
+    groups.len() >= 2
+        && (1..=3).contains(&groups[0].len())
+        && groups[1..].iter().all(|g| g.len() == 3)
+        && groups.iter().all(|g| g.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// Account numbers, references and IDs in one piece: seven or more digits,
+/// alone or with a short letter prefix ("ACC12345678", "INV-2026-0001234").
+fn is_long_number(text: &str) -> bool {
+    let text = core(text);
+    if is_date(text) || is_amount(text) {
+        return false;
+    }
+    let digits = text.chars().filter(char::is_ascii_digit).count();
+    let alnum = text.chars().filter(char::is_ascii_alphanumeric).count();
+    digits >= 7
+        && digits * 2 >= alnum
+        && text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "+()-./#_".contains(c))
+}
+
+/// A word that is private on its own (not as part of a number run).
+fn private_word(text: &str) -> bool {
+    is_email(text) || segments(text).any(|s| is_email(s) || is_key(s) || is_long_number(s))
+}
+
+/// A number run in progress: line, covered area, digits, words, and the
+/// most digits in any one word.
+#[derive(Clone, Copy)]
+struct Run {
+    line: usize,
+    area: Area,
+    digits: usize,
+    words: usize,
+    longest: usize,
+}
+
 /// Areas to pixelate. Number runs may span several words on one line
-/// ("(555) 123-4567", "4111 1111 1111 1111") and count from 7 digits.
+/// ("(555) 123-4567", "4111 1111 1111 1111") and count from 7 digits; a
+/// run of single digits ("1 2 3 4 5 6 7", page numbers) does not count.
 pub fn private_areas(words: &[Word]) -> Vec<Area> {
     let mut areas = Vec::new();
-    let mut run: Option<(usize, Area, usize)> = None; // line, area, digits
-    let flush = |run: &mut Option<(usize, Area, usize)>, areas: &mut Vec<Area>| {
-        if let Some((_, area, digits)) = run.take() {
-            if (7..=19).contains(&digits) {
-                areas.push(area);
+    let mut run: Option<Run> = None;
+    let flush = |run: &mut Option<Run>, areas: &mut Vec<Area>| {
+        if let Some(r) = run.take() {
+            if r.digits >= 7 && (r.words == 1 || r.longest >= 3) {
+                areas.push(r.area);
             }
         }
     };
     for word in words {
-        if run.is_some_and(|(line, _, _)| line != word.line) {
-            flush(&mut run, &mut areas);
-        }
-        if is_email(&word.text) || is_key(&word.text) {
-            flush(&mut run, &mut areas);
-            areas.push(Area::of(word));
+        let number =
+            number_part(&word.text).filter(|_| !is_date(&word.text) && !is_amount(&word.text));
+        if let Some(digits) = number {
+            // A gap wider than a few spaces starts a separate number, such as
+            // the next column of a table.
+            if run.is_some_and(|r| {
+                r.line != word.line || word.x - (r.area.x + r.area.w) > word.h * 0.6
+            }) {
+                flush(&mut run, &mut areas);
+            }
+            run = Some(match run {
+                Some(r) => Run {
+                    area: r.area.union(Area::of(word)),
+                    digits: r.digits + digits,
+                    words: r.words + 1,
+                    longest: r.longest.max(digits),
+                    ..r
+                },
+                None => Run {
+                    line: word.line,
+                    area: Area::of(word),
+                    digits,
+                    words: 1,
+                    longest: digits,
+                },
+            });
             continue;
         }
-        match number_part(&word.text).filter(|_| !is_date(&word.text)) {
-            Some(digits) => {
-                // A wide gap or too many digits means a separate number,
-                // such as two phone numbers side by side.
-                if run.is_some_and(|(_, area, total)| {
-                    total + digits > 19 || word.x - (area.x + area.w) > word.h * 1.5
-                }) {
-                    flush(&mut run, &mut areas);
-                }
-                run = Some(match run {
-                    Some((line, area, total)) => (line, area.union(Area::of(word)), total + digits),
-                    None => (word.line, Area::of(word), digits),
-                });
-            }
-            None => flush(&mut run, &mut areas),
+        flush(&mut run, &mut areas);
+        if private_word(&word.text) {
+            areas.push(Area::of(word));
         }
     }
     flush(&mut run, &mut areas);
@@ -175,6 +241,7 @@ pub fn private_areas(words: &[Word]) -> Vec<Area> {
 mod tests {
     use super::*;
 
+    /// Words 95 pixels wide, 100 apart: a 5 pixel gap, like one space.
     fn line(n: usize, texts: &[&str]) -> Vec<Word> {
         texts
             .iter()
@@ -184,7 +251,7 @@ mod tests {
                 line: n,
                 x: i as f32 * 100.,
                 y: n as f32 * 20.,
-                w: 90.,
+                w: 95.,
                 h: 16.,
             })
             .collect()
@@ -196,50 +263,63 @@ mod tests {
 
     #[test]
     fn finds_emails_keys_and_number_runs() {
-        assert_eq!(
-            found(&line(0, &["Mail", "jane.doe@example.co.uk,"])),
-            [(100., 90.)]
-        );
-        assert_eq!(
-            found(&line(0, &["key:", "sk-proj-abc123DEF456ghi789"])),
-            [(100., 90.)]
-        );
-        assert_eq!(
-            found(&line(0, &["token", "9f86d081884c7d659a2feaa0c55ad015"])),
-            [(100., 90.)]
-        );
-        // A phone number split over words is one area spanning them.
+        let second = [(100., 95.)];
+        for words in [
+            ["Mail", "jane.doe@example.co.uk,"],
+            ["key:", "sk-proj-abc123DEF456ghi789"],
+            ["token", "9f86d081884c7d659a2feaa0c55ad015"],
+            ["Server", "192.168.1.100"],
+            ["Tel", "555-123-4567"],
+            ["Tel", "555.123.4567"],
+            ["Ask", "(alice@example.com)"],
+            ["Ask", "(support@example.com)."],
+            [
+                "Reset",
+                "https://app.example.com/reset?token=8f7d6c5b4a39281716f5e4d3c2b1a099",
+            ],
+            ["Set", "API_KEY=\"Zk3a9fQ2xL7mP0vB8nR4tY6u\""],
+            ["Host", "203.0.113.7:8080"],
+            ["Account", "ACC12345678"],
+            ["Invoice", "INV-2026-0001234"],
+            ["Ref", "12345678901234567890"],
+        ] {
+            assert_eq!(found(&line(0, &words)), second, "{words:?}");
+        }
+        // A number split over words is one area spanning them, whatever its length.
         assert_eq!(
             found(&line(0, &["Call", "(555)", "123-4567", "now"])),
-            [(100., 190.)]
+            [(100., 195.)]
         );
         assert_eq!(
             found(&line(0, &["4111", "1111", "1111", "1111"])),
-            [(0., 390.)]
+            [(0., 395.)]
         );
-        assert_eq!(found(&line(0, &["Server", "192.168.1.100"])), [(100., 90.)]);
-        // Two numbers side by side are two areas, not one rejected run.
+        assert_eq!(
+            found(&line(0, &["1234", "5678", "9012", "3456", "7890"])),
+            [(0., 495.)]
+        );
+        assert_eq!(
+            found(&line(0, &["+44", "20", "7946", "0958"])),
+            [(0., 395.)]
+        );
         assert_eq!(
             found(&line(0, &["555-123-4567", "555-987-6543"])),
-            [(0., 90.), (100., 90.)]
+            [(0., 195.)]
         );
-        // Brackets around an address or key do not hide it.
-        assert_eq!(
-            found(&line(0, &["Ask", "(alice@example.com)"])),
-            [(100., 90.)]
-        );
-        // Dashed and dotted phone numbers are not dates.
-        assert_eq!(found(&line(0, &["Tel", "555-123-4567"])), [(100., 90.)]);
-        assert_eq!(found(&line(0, &["Tel", "555.123.4567"])), [(100., 90.)]);
     }
 
     #[test]
-    fn leaves_ordinary_text_dates_and_short_numbers() {
+    fn leaves_ordinary_text_dates_amounts_and_short_numbers() {
         for words in [
             line(0, &["Meeting", "on", "2026-10-14", "at", "10"]),
             line(0, &["Due", "14/10/2026", "or", "10.14.2026"]),
+            line(0, &["Released", "2026-10-14."]),
             line(0, &["Version", "0.3.26", "preview"]),
             line(0, &["Total:", "$1,234"]),
+            line(0, &["Total:", "$1,234,567.89"]),
+            line(0, &["Revenue", "1,234,567"]),
+            line(0, &["Pages", "1", "2", "3", "4", "5", "6", "7"]),
+            line(0, &["At", "10:45:30"]),
             line(0, &["https://example.com/docs/page"]),
             line(0, &["supercalifragilisticexpialidocious"]),
             line(0, &["user@localhost"]),
@@ -249,10 +329,16 @@ mod tests {
     }
 
     #[test]
-    fn number_runs_stop_at_line_breaks() {
+    fn number_runs_stop_at_line_breaks_and_column_gaps() {
         let mut words = line(0, &["555"]);
         words.extend(line(1, &["1234"]));
         assert!(private_areas(&words).is_empty());
+        // Table columns far apart are separate small numbers.
+        let mut columns = line(0, &["150", "200", "450"]);
+        for (i, w) in columns.iter_mut().enumerate() {
+            w.x = i as f32 * 200.;
+        }
+        assert!(private_areas(&columns).is_empty());
     }
 
     #[test]

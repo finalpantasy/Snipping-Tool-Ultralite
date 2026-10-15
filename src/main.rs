@@ -42,6 +42,28 @@ use snipping_tool_ul::tray::{self, TrayState};
 use snipping_tool_ul::upload_feedback::UploadFeedback;
 use snipping_tool_ul::window_detect;
 
+/// Populates the real Windows clipboard before the preview is displayed.
+#[cfg(target_os = "windows")]
+fn snip_with_copy(clipboard_ticket: u64, screen: capture::CapturedScreen) -> SnipResult {
+    let copy = export::copy_with_ticket_sequence(
+        clipboard_ticket,
+        &screen.pixels,
+        screen.width,
+        screen.height,
+    );
+    let clipboard_sequence = copy.as_ref().ok().copied().flatten();
+    let clipboard_error = match copy {
+        Ok(Some(_)) => None,
+        Ok(None) => Some("A newer clipboard request was kept. Use Copy to copy this image.".into()),
+        Err(error) => Some(error),
+    };
+    SnipResult {
+        screen,
+        clipboard_error,
+        clipboard_sequence,
+    }
+}
+
 struct SnipResult {
     screen: capture::CapturedScreen,
     clipboard_error: Option<String>,
@@ -69,7 +91,8 @@ enum UserEvent {
         revision: u64,
         origin: (u32, u32),
         size: (u32, u32),
-        result: Result<Vec<snipping_tool_ul::redact::Area>, String>,
+        /// Words recognized, and the areas to hide.
+        result: Result<(usize, Vec<snipping_tool_ul::redact::Area>), String>,
     },
     /// A Copy click finished; the clipboard now holds these annotations.
     Copied {
@@ -848,6 +871,19 @@ impl App {
                             let _ = windows::Win32::Graphics::Dwm::DwmFlush();
                         }
                     }
+                    // The same area again, captured directly, when all of it is
+                    // still on screen. After a display change the ordinary
+                    // picker runs instead of a cropped or empty snip.
+                    let repeat = repeat.filter(|r| {
+                        r.width > 0
+                            && r.height > 0
+                            && r.intersect(capture::virtual_bounds()) == Some(*r)
+                    });
+                    if let Some(rect) = repeat {
+                        let clipboard_ticket = snipping_tool_ul::clipboard_queue::reserve();
+                        let screen = capture::capture_region(rect).map_err(|e| e.to_string())?;
+                        return Ok(Some(snip_with_copy(clipboard_ticket, screen)));
+                    }
                     let windows = if matches!(mode, CaptureMode::Window) {
                         snipping_tool_ul::window_detect::enumerate_window_rects()
                     } else {
@@ -855,13 +891,7 @@ impl App {
                     };
                     let snapshot: &capture::BgraSnapshot = frozen
                         .insert(capture::capture_frozen_desktop().map_err(|e| e.to_string())?);
-                    // A display change can move or remove the old area; when
-                    // nothing of it is left, the ordinary picker runs instead.
-                    let repeat = repeat
-                        .and_then(|r| r.intersect(snapshot.bounds()))
-                        .filter(|r| r.width > 0 && r.height > 0);
                     let rect = match mode {
-                        _ if repeat.is_some() => Ok(repeat),
                         CaptureMode::Region => {
                             snipping_tool_ul::region_picker::select_region(snapshot)
                         }
@@ -875,28 +905,7 @@ impl App {
                         let clipboard_ticket = snipping_tool_ul::clipboard_queue::reserve();
                         // Only the selection is converted to RGBA.
                         let screen = snapshot.region_rgba(rect).map_err(|e| e.to_string())?;
-                        // Populate the real Windows clipboard before displaying
-                        // the preview.
-                        let copy = export::copy_with_ticket_sequence(
-                            clipboard_ticket,
-                            &screen.pixels,
-                            screen.width,
-                            screen.height,
-                        );
-                        let clipboard_sequence = copy.as_ref().ok().copied().flatten();
-                        let clipboard_error = match copy {
-                            Ok(Some(_)) => None,
-                            Ok(None) => Some(
-                                "A newer clipboard request was kept. Use Copy to copy this image."
-                                    .into(),
-                            ),
-                            Err(error) => Some(error),
-                        };
-                        Ok(SnipResult {
-                            screen,
-                            clipboard_error,
-                            clipboard_sequence,
-                        })
+                        Ok(snip_with_copy(clipboard_ticket, screen))
                     })
                     .transpose()
                 })();
@@ -1027,6 +1036,13 @@ impl App {
             .with_visible(false)
             .with_decorations(true)
             .with_resizable(true);
+        // The editor is not a drop target, so dragging its image out and
+        // letting go over it again counts as "not dropped".
+        #[cfg(target_os = "windows")]
+        let attrs = {
+            use winit::platform::windows::WindowAttributesExtWindows;
+            attrs.with_drag_and_drop(false)
+        };
         let setup = (|| {
             let window = Arc::new(event_loop.create_window(attrs).map_err(|e| e.to_string())?);
             let surface = snipping_tool_ul::native_surface::Surface::new(window.clone())?;
@@ -1251,6 +1267,7 @@ impl App {
     }
 
     fn close_overlay(&mut self) {
+        self.editor_ui.header.flash_until = None;
         self.copy_press = None;
         self.space_held = false;
         self.space_panned = false;
@@ -1328,12 +1345,6 @@ impl App {
                                 annotations,
                                 sequence,
                             });
-                            if history {
-                                // Repeated Copy clicks must not push older captures out.
-                                let _ = snipping_tool_ul::history::save_to_history_if_new(
-                                    &pixels, w, h,
-                                );
-                            }
                             (true, "Copied to clipboard".into())
                         }
                         Ok(None) => (false, "A newer clipboard request was kept.".into()),
@@ -1346,6 +1357,10 @@ impl App {
                     succeeded,
                     close_on_success,
                 });
+                if succeeded && history {
+                    // Repeated Copy clicks must not push older captures out.
+                    let _ = snipping_tool_ul::history::save_to_history_if_new(&pixels, w, h);
+                }
             });
         } else {
             self.report_export_preparation_failure("Copy failed");
@@ -1367,11 +1382,17 @@ impl App {
         };
         let result = snipping_tool_ul::drag_out::drag_image(&pixels, w, h);
         drop(pixels);
-        if let Err(e) = result {
-            tracing::error!("Drag out failed: {e}");
-            self.editor_ui.header.status = e.clone();
-            if let AppState::Capturing(ref mut o) = self.state {
-                o.show_toast(e, 6000);
+        match result {
+            // Nothing took the drop (a sloppy click, or released over UL):
+            // the press was on Copy, so copy.
+            Ok(false) => self.do_copy(),
+            Ok(true) => {}
+            Err(e) => {
+                tracing::error!("Drag out failed: {e}");
+                self.editor_ui.header.status = e.clone();
+                if let AppState::Capturing(ref mut o) = self.state {
+                    o.show_toast(e, 6000);
+                }
             }
         }
         self.needs_redraw = true;
@@ -1707,6 +1728,13 @@ impl App {
     /// one undo step. Shares the single OCR worker with Extract text.
     fn do_redact(&mut self) {
         let Some(operation) = self.ocr_flight.start() else {
+            if let AppState::Capturing(ref mut o) = self.state {
+                o.show_toast(
+                    "Text recognition is still running. Try again in a moment.".into(),
+                    5000,
+                );
+                self.needs_redraw = true;
+            }
             return;
         };
         let data = if let AppState::Capturing(ref o) = self.state {
@@ -1742,7 +1770,7 @@ impl App {
                 event(Err("OCR stopped unexpectedly. Try again.".into())),
             );
             let result = snipping_tool_ul::ocr::find_words_owned(pixels, w, h)
-                .map(|words| snipping_tool_ul::redact::private_areas(&words));
+                .map(|words| (words.len(), snipping_tool_ul::redact::private_areas(&words)));
             ready.send(event(result));
         }));
     }
@@ -2216,7 +2244,7 @@ impl Drop for ReadyGuard {
 
 impl ApplicationHandler<UserEvent> for App {
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        snipping_tool_ul::drag_out::remove_old_files(&std::env::temp_dir(), None);
+        snipping_tool_ul::drag_out::remove_old_files(&snipping_tool_ul::drag_out::drag_dir());
         let deadline = Instant::now() + Duration::from_secs(15);
         snipping_tool_ul::ocr::cancel_pending();
         if let Some(worker) = self.ocr_worker.take() {
@@ -2267,14 +2295,16 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 };
                 let message = match result {
-                    Ok(areas) if areas.is_empty() => {
+                    Ok((0, _)) => "No text recognized in this snip".to_string(),
+                    Ok((_, areas)) if areas.is_empty() => {
                         "No emails, long numbers or keys found".to_string()
                     }
-                    Ok(areas) => {
+                    Ok((_, areas)) => {
                         // Indices below assume no text is mid-edit.
                         o.commit_text();
-                        let block = o.pixelate_tool.block_size().max(10);
+                        let base = o.pixelate_tool.block_size().max(10);
                         let count = areas.len();
+                        let copied_before = o.clipboard_copy.is_some();
                         o.add_annotations(
                             areas
                                 .into_iter()
@@ -2286,13 +2316,20 @@ impl ApplicationHandler<UserEvent> for App {
                                         origin.1 as f32 + a.y,
                                     ),
                                     size: snipping_tool_ul::geometry::Size::new(a.w, a.h),
-                                    block_size: block,
+                                    // Big text needs big blocks to stay unreadable.
+                                    block_size: base.max((a.h / 4.).min(64.) as u8),
                                 })
                                 .collect(),
                         );
                         format!(
-                            "Hid {count} private detail{}. Check the image; Ctrl+Z undoes it.",
-                            if count == 1 { "" } else { "s" }
+                            "Hid {count} private detail{}.{} Ctrl+Z undoes it.",
+                            if count == 1 { "" } else { "s" },
+                            // The clipboard still has the unhidden snip.
+                            if copied_before {
+                                " Press Ctrl+C to copy the hidden version."
+                            } else {
+                                ""
+                            }
                         )
                     }
                     Err(e) => format!("Hide private info failed: {e}"),
@@ -2309,8 +2346,11 @@ impl ApplicationHandler<UserEvent> for App {
                 if revision == self.image_revision {
                     if let AppState::Capturing(ref mut o) = self.state {
                         o.clipboard_copy = Some((annotations, sequence));
-                        self.editor_ui.header.flash_until =
-                            Some(Instant::now() + Duration::from_millis(700));
+                        // 0: another app wrote meanwhile, so it is not confirmed.
+                        if sequence != 0 {
+                            self.editor_ui.header.flash_until =
+                                Some(Instant::now() + Duration::from_millis(700));
+                        }
                         self.needs_redraw = true;
                     }
                 }
@@ -2418,6 +2458,19 @@ impl ApplicationHandler<UserEvent> for App {
                 } else if event.state == global_hotkey::HotKeyState::Pressed
                     && Some(event.id) == self.repeat_hotkey_id
                 {
+                    // While Settings records a shortcut the repeat combination
+                    // never reaches it (RegisterHotKey swallows it): record it.
+                    if let Some(sw) = &mut self.settings_window {
+                        if sw.editing_hotkey {
+                            if let Some(repeat) = self.registered_repeat_hotkey.clone() {
+                                sw.config.hotkey.capture = repeat;
+                            }
+                            sw.editing_hotkey = false;
+                            sw.needs_redraw = true;
+                            sw.window.request_redraw();
+                            return;
+                        }
+                    }
                     self.trigger_repeat_capture(event_loop, false);
                 }
             }
@@ -3176,6 +3229,8 @@ impl ApplicationHandler<UserEvent> for App {
                             self.copy_press = None;
                             self.space_held = false;
                             self.space_panned = false;
+                            // The release of a press may never arrive here.
+                            self.editor_pointer_down = false;
                         }
                         self.editor_ui.cancel_new_capture();
                         if self.editor_view.end_pan() {
@@ -3295,7 +3350,16 @@ impl ApplicationHandler<UserEvent> for App {
                         if self.editor_ui.hover(p, w, h, o) {
                             self.needs_redraw = true;
                         }
-                        if (self.editor_ui.header.menu != snipping_tool_ul::launcher::Menu::None
+                        // Space held over the image: show that a drag will pan.
+                        if self.space_held
+                            && !self.editor_pointer_down
+                            && self.editor_ui.header.menu == snipping_tool_ul::launcher::Menu::None
+                            && snipping_tool_ul::editor_ui::EditorUi::canvas_rect(w, h).contains(p)
+                        {
+                            window.set_cursor(CursorIcon::Grab);
+                            consumed = true;
+                        } else if (self.editor_ui.header.menu
+                            != snipping_tool_ul::launcher::Menu::None
                             || !snipping_tool_ul::editor_ui::EditorUi::canvas_rect(w, h)
                                 .contains(p))
                             && o.drag_start.is_none()
@@ -3557,7 +3621,11 @@ impl ApplicationHandler<UserEvent> for App {
                 self.modifiers = mods.state();
             }
 
-            WindowEvent::KeyboardInput { event, .. } => {
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic,
+                ..
+            } => {
                 // Hold Space and drag to pan; a tap without dragging fits the
                 // image (Select tool), as Space alone always did.
                 // A held Space always ends on release, even if text editing
@@ -3583,9 +3651,13 @@ impl ApplicationHandler<UserEvent> for App {
                         if panned {
                             self.editor_view.end_pan();
                         }
+                        // A synthetic release comes from losing focus, not a tap.
                         if !panned
+                            && !is_synthetic
                             && !self.editor_view.is_panning()
                             && !self.editor_pointer_down
+                            && !self.editor_ui.size_dragging
+                            && self.copy_press.is_none()
                             && self.editor_ui.size_draft.is_none()
                             && self.editor_ui.header.menu == snipping_tool_ul::launcher::Menu::None
                         {
@@ -3593,7 +3665,12 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         self.needs_redraw = true;
                         if let Some(w) = &self.overlay_window {
-                            w.set_cursor(CursorIcon::Default);
+                            w.set_cursor(determine_cursor(
+                                overlay,
+                                overlay.last_mouse_pos,
+                                true,
+                                hit_slop,
+                            ));
                             w.request_redraw();
                         }
                     }

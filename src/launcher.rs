@@ -840,9 +840,12 @@ impl Model {
                 true,
             );
         } else if self.menu == Menu::None {
+            // The upload result panel covers the right of this line.
             let shortcut = match &self.repeat_hotkey {
-                Some(repeat) => format!("Shortcut  {}   Same area  {repeat}", self.hotkey),
-                None => format!("Shortcut  {}", self.hotkey),
+                Some(repeat) if !self.upload_feedback.visible() => {
+                    format!("Shortcut  {}   Same area  {repeat}", self.hotkey)
+                }
+                _ => format!("Shortcut  {}", self.hotkey),
             };
             c.label(20., 77., &shortcut, 12., ui::ink());
             let label = if self.status.is_empty() {

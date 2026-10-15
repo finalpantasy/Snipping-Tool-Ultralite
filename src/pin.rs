@@ -48,6 +48,9 @@ pub struct PinnedWindow {
     drag_start: Option<winit::dpi::PhysicalPosition<f64>>,
     temp_path: Option<Arc<TempImage>>,
     ctrl: bool,
+    pointer: winit::dpi::PhysicalPosition<f64>,
+    /// Where a Ctrl+press started; moving away from it drags the image out.
+    drag_out_from: Option<winit::dpi::PhysicalPosition<f64>>,
 }
 
 impl PinnedWindow {
@@ -212,6 +215,8 @@ impl PinnedWindow {
             drag_start: None,
             temp_path,
             ctrl: false,
+            pointer: winit::dpi::PhysicalPosition::new(0., 0.),
+            drag_out_from: None,
         };
         if let Err(error) = pin.render() {
             tracing::error!("Failed to present pin: {error}");
@@ -243,6 +248,9 @@ impl PinnedWindow {
     /// Handle an event for this pin's window. Returns true when the pin
     /// should be closed (Escape pressed or window close requested).
     pub fn handle_event(&mut self, event: &WindowEvent) -> bool {
+        if let WindowEvent::CursorMoved { position, .. } = event {
+            self.pointer = *position;
+        }
         match event {
             WindowEvent::CloseRequested => return true,
 
@@ -267,9 +275,18 @@ impl PinnedWindow {
                 button: MouseButton::Left,
                 ..
             } if self.ctrl => {
-                let (pixels, w, h) = self.image_pixels();
-                if let Err(e) = crate::drag_out::drag_image(&pixels, w, h) {
-                    tracing::error!("Pin drag out failed: {e}");
+                self.drag_out_from = Some(self.pointer);
+            }
+
+            WindowEvent::CursorMoved { position, .. } if self.drag_out_from.is_some() => {
+                let start = self.drag_out_from.unwrap_or(*position);
+                if (position.x - start.x).hypot(position.y - start.y) > 6. {
+                    self.drag_out_from = None;
+                    let (pixels, w, h) = self.image_pixels();
+                    if let Err(e) = crate::drag_out::drag_image(&pixels, w, h) {
+                        tracing::error!("Pin drag out failed: {e}");
+                    }
+                    self.ctrl = ctrl_down();
                 }
             }
 
@@ -284,6 +301,7 @@ impl PinnedWindow {
                     self.window.set_cursor(CursorIcon::Grabbing);
                 }
                 ElementState::Released => {
+                    self.drag_out_from = None;
                     self.dragging = false;
                     self.drag_start = None;
                     self.window.set_cursor(CursorIcon::Grab);
@@ -345,6 +363,19 @@ impl PinnedWindow {
 
             _ => {}
         }
+        false
+    }
+}
+
+/// Whether Ctrl is held right now, for after a modal loop ate its key-up.
+fn ctrl_down() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL};
+        unsafe { GetKeyState(VK_CONTROL.0 as i32) < 0 }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
         false
     }
 }

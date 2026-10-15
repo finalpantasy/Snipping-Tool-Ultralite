@@ -83,7 +83,13 @@ fn every_capture_shortcut_gets_a_distinct_valid_repeat_or_none() {
                     parse_binding(&capture).unwrap(),
                     "{capture}"
                 );
-                assert_ne!(repeat, "Alt+PrintScreen", "Windows owns Alt+PrintScreen");
+                for reserved in ["Alt+PrintScreen", "Shift+Alt+PrintScreen", "Alt+F4"] {
+                    assert_ne!(
+                        parse_binding(&repeat).unwrap(),
+                        parse_binding(reserved).unwrap(),
+                        "{capture} -> {repeat} is a Windows shortcut"
+                    );
+                }
             }
         }
     }

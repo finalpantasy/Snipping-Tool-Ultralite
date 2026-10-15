@@ -117,6 +117,10 @@ pub fn parse_binding(binding: &str) -> Result<(Modifiers, Code), String> {
 /// shortcut already uses Alt and Shift.
 pub fn repeat_binding(capture: &str) -> Option<String> {
     let (mods, code) = parse_binding(capture).ok()?;
+    // A bare F-key would become Alt+F4 and similar; leave those alone.
+    if mods.is_empty() && code != Code::PrintScreen {
+        return None;
+    }
     let mut mods = mods;
     if code == Code::PrintScreen && mods.is_empty() {
         mods |= Modifiers::SHIFT;
@@ -125,6 +129,13 @@ pub fn repeat_binding(capture: &str) -> Option<String> {
     } else if !mods.contains(Modifiers::SHIFT) {
         mods |= Modifiers::SHIFT;
     } else {
+        return None;
+    }
+    // Windows owns Alt+F4 (close window), Alt+PrintScreen (window shot) and
+    // Shift+Alt+PrintScreen (High Contrast).
+    if (mods == Modifiers::ALT && code == Code::F4)
+        || (code == Code::PrintScreen && mods.contains(Modifiers::ALT))
+    {
         return None;
     }
     // The key may be written anywhere ("S+Ctrl+Shift"); it is the one part

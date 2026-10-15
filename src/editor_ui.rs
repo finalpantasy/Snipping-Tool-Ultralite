@@ -253,7 +253,14 @@ impl EditorUi {
                 actions.insert(1, REDACT);
             }
             let rows = annotations.len().div_ceil(2) + actions.len().div_ceil(2);
-            let mut y = (ty - rows as f32 * 32. - 58.).max(55.);
+            // Tighter rows when the window is too short for the menu to sit
+            // between the header bar and the toolbar.
+            let row_h = if ty - rows as f32 * 32. - 58. >= 62. {
+                32.
+            } else {
+                28.
+            };
+            let mut y = (ty - rows as f32 * row_h - 58.).max(62.);
             let mut targets = Vec::new();
             for group in [annotations, actions] {
                 if group.is_empty() {
@@ -263,9 +270,9 @@ impl EditorUi {
                 for (n, i) in group.iter().enumerate() {
                     targets.push(Target::new(
                         (w - 360.) / 2. + (n % 2) as f32 * 180.,
-                        y + (n / 2) as f32 * 32.,
+                        y + (n / 2) as f32 * row_h,
                         180.,
-                        32.,
+                        row_h,
                         if *i == REDACT {
                             Action::Redact
                         } else {
@@ -273,7 +280,7 @@ impl EditorUi {
                         },
                     ));
                 }
-                y += group.len().div_ceil(2) as f32 * 32.;
+                y += group.len().div_ceil(2) as f32 * row_h;
             }
             return targets;
         }
@@ -781,9 +788,6 @@ impl EditorUi {
                         Action::ToggleColors => "Choose the annotation color",
                         Action::ToggleTools => "More annotations, extract text, and pin",
                         Action::ResetZoom => "Reset zoom to fit the window (Ctrl+0)",
-                        Action::Redact => {
-                            "Pixelate emails, long numbers and keys found in the image"
-                        }
                         _ => "",
                     };
                     if !label.is_empty() {

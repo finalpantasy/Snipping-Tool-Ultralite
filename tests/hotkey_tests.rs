@@ -91,6 +91,9 @@ fn repeat_shortcut_adds_one_modifier_to_the_capture_shortcut() {
     );
     assert_eq!(repeat_binding("Ctrl+Shift+Alt+S"), None);
     assert_eq!(repeat_binding("nonsense"), None);
+    // Never a Windows combination: no Alt+F4, no Alt+PrintScreen variants.
+    assert_eq!(repeat_binding("F4"), None);
+    assert_eq!(repeat_binding("Shift+PrintScreen"), None);
     // The key can come first in a hand-edited config.
     assert_eq!(
         repeat_binding("S+Ctrl+Shift").as_deref(),
