@@ -11,10 +11,10 @@ APPS = ["Snipping Tool UL", "Windows Snipping Tool", "ShareX", "Greenshot", "Fla
 
 ROWS = [
     # label, detail, unit, values in APPS order, word for "lowest"
-    ("Start a snip", "hotkey to selection screen", "ms", [170, 363, 249, 265, None], "fastest"),
-    ("Image on clipboard", "after you let go of the mouse", "ms", [50, 91, 144, 63, None], "fastest"),
-    ("Memory while snipping", "RAM in use during a capture", "MB", [14, 474, 922, 133, None], "least"),
-    ("Memory in the background", "waiting in the tray", "MB", [2.0, 0, 107, 45, 8.3], "least"),
+    ("Start a snip", "hotkey to selection screen", "ms", [126, 416, 265, 280, None], "fastest"),
+    ("Image on clipboard", "after you let go of the mouse", "ms", [51, 114, 158, 63, None], "fastest"),
+    ("Memory while snipping", "RAM in use during a capture", "MB", [14, 474, 1254, 133, None], "least"),
+    ("Memory in the background", "waiting in the tray", "MB", [2.0, 0, 106, 45, 8.1], "least"),
     ("Space on disk", "unpacked or installed size", "MB", [9.6, 420, 517, 9.0, 95], "smallest"),
 ]
 

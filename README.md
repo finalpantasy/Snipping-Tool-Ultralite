@@ -33,10 +33,10 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/media/comparison-dark.svg">
-  <img src="docs/media/comparison-light.svg" alt="Snipping Tool UL compared with Windows Snipping Tool, ShareX, Greenshot and Flameshot. Start a snip: UL 170 ms, Windows 363, ShareX 249, Greenshot 265. Image on clipboard: UL 50 ms, Windows 91, ShareX 144, Greenshot 63. Memory while snipping: UL 14 MB, Windows 474, ShareX 922, Greenshot 133. Memory in the background: UL 2 MB, Windows 0 (not running), ShareX 107, Greenshot 45, Flameshot 8. Space on disk: UL 9.6 MB, Windows 420, ShareX 517, Greenshot 9.0, Flameshot 95.">
+  <img src="docs/media/comparison-light.svg" alt="Snipping Tool UL compared with Windows Snipping Tool, ShareX, Greenshot and Flameshot. Start a snip: UL 126 ms, Windows 416, ShareX 265, Greenshot 280. Image on clipboard: UL 51 ms, Windows 114, ShareX 158, Greenshot 63. Memory while snipping: UL 14 MB, Windows 474, ShareX 1,254, Greenshot 133. Memory in the background: UL 2 MB, Windows 0 (not running), ShareX 106, Greenshot 45, Flameshot 8. Space on disk: UL 9.6 MB, Windows 420, ShareX 517, Greenshot 9.0, Flameshot 95.">
 </picture>
 
-<sub>Snipping Tool UL 0.3.25, Windows Snipping Tool 11.2608.41.0, ShareX 21.0.0, Greenshot 1.3.323 and Flameshot 14.0.0 on the same Windows 11 PC with three 4K monitors, October 14, 2026. 30 test snips per app, typical (median) result shown, every snip checked pixel by pixel. <a href="docs/PERFORMANCE.md">How we measured</a></sub>
+<sub>Snipping Tool UL 0.3.26, Windows Snipping Tool 11.2608.41.0, ShareX 21.0.0, Greenshot 1.3.323 and Flameshot 14.0.0 on the same Windows 11 PC with three 4K monitors, October 14, 2026. 30 test snips per app, typical (median) result shown, every snip checked pixel by pixel. <a href="docs/PERFORMANCE.md">How we measured</a></sub>
 
 Flameshot asks which monitor to use before every snip on a PC with more than one screen, so its snip speed could not be measured the same way.
 
