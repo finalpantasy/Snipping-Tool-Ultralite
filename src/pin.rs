@@ -135,6 +135,7 @@ impl PinnedWindow {
             .with_position(winit::dpi::PhysicalPosition::new(pin_x, pin_y))
             .with_window_level(WindowLevel::AlwaysOnTop)
             .with_decorations(false);
+        let attrs = crate::ui::not_a_drop_target(attrs);
 
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Arc::new(w),

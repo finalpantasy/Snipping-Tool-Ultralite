@@ -923,13 +923,13 @@ impl LauncherWindow {
     pub fn create(event_loop: &ActiveEventLoop, model: Model) -> Result<Self, String> {
         let window = Arc::new(
             event_loop
-                .create_window(
+                .create_window(crate::ui::not_a_drop_target(
                     WindowAttributes::default()
                         .with_title("Snipping Tool UL")
                         .with_inner_size(winit::dpi::LogicalSize::new(WIDTH, model.height()))
                         .with_resizable(false)
                         .with_visible(false),
-                )
+                ))
                 .map_err(|e| e.to_string())?,
         );
         let surface = crate::native_surface::Surface::new(window.clone())?;

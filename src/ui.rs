@@ -454,3 +454,19 @@ pub fn opaque_rgb(rgba: &[u8]) -> Vec<u32> {
         })
         .collect()
 }
+
+/// UL windows take no file drops. Without this, letting go of a drag over
+/// one of them would count as a successful drop that does nothing.
+pub fn not_a_drop_target(
+    attrs: winit::window::WindowAttributes,
+) -> winit::window::WindowAttributes {
+    #[cfg(target_os = "windows")]
+    {
+        use winit::platform::windows::WindowAttributesExtWindows;
+        attrs.with_drag_and_drop(false)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        attrs
+    }
+}

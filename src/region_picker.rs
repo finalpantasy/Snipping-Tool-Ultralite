@@ -154,6 +154,12 @@ unsafe fn update_selection(hwnd: HWND, state: &Picker, end: (i32, i32)) {
     let Some(rect) = state.selection_at(Some(end)) else {
         let _ = ShowWindow(state.border, SW_HIDE);
         let _ = ShowWindow(state.readout, SW_HIDE);
+        // The next selection must show the label again, even in the same place.
+        READOUT.with(|r| {
+            if let Some(s) = r.borrow_mut().as_mut() {
+                s.place = (0, 0, 0, 0);
+            }
+        });
         if !state.window_mode {
             // Remove the old cutout when a drag collapses or moves offscreen.
             // A null region restores the full rectangular dim veil.
@@ -284,47 +290,119 @@ unsafe fn monitor_of(rect: ScreenRect) -> Option<(ScreenRect, u32)> {
     ))
 }
 
+/// What the size label last showed, so a mouse move that changes nothing
+/// costs nothing, and one font serves the whole picker. The picker runs on
+/// its own thread, which owns this state and the label window.
+struct ReadoutState {
+    dpi: u32,
+    font: HFONT,
+    /// Measured size for a text length: the digits are equally wide.
+    measured: Option<(usize, (i32, i32))>,
+    text: Vec<u16>,
+    place: (i32, i32, i32, i32),
+}
+
+thread_local! {
+    static READOUT: std::cell::RefCell<Option<ReadoutState>> =
+        const { std::cell::RefCell::new(None) };
+    /// The label window, hidden, destroyed after the copy so its teardown
+    /// is not on the path from mouse release to clipboard.
+    static LEFTOVER: std::cell::Cell<HWND> = const { std::cell::Cell::new(HWND(std::ptr::null_mut())) };
+}
+
+/// Destroys the hidden size label left by the last picker on this thread.
+/// Call after the snip is copied; thread exit also cleans it up.
+pub fn release_leftovers() {
+    let hwnd = LEFTOVER.with(|l| l.replace(HWND::default()));
+    if !hwnd.is_invalid() {
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
+}
+
+/// Frees the label's font when the picker ends.
+fn forget_readout() {
+    if let Some(state) = READOUT.with(|r| r.borrow_mut().take()) {
+        unsafe {
+            let _ = DeleteObject(state.font);
+        }
+    }
+}
+
 unsafe fn show_readout(readout: HWND, rect: ScreenRect, bounds: ScreenRect) {
     if readout.is_invalid() {
         return;
     }
-    let mut text = readout_text(rect);
+    let text = readout_text(rect);
     // Size the label for the monitor it is about to move to, which is the
     // DPI it will paint with there.
     let monitor = monitor_of(rect);
     let dpi = monitor.map_or_else(|| GetDpiForWindow(readout), |(_, dpi)| dpi);
-    let dc = GetDC(readout);
-    if dc.is_invalid() {
-        return;
-    }
-    let font = readout_font(dpi);
-    let old = SelectObject(dc, font);
-    let mut extent = windows::Win32::Foundation::SIZE::default();
-    let measured = GetTextExtentPoint32W(dc, &text, &mut extent).as_bool();
-    SelectObject(dc, old);
-    let _ = DeleteObject(font);
-    ReleaseDC(readout, dc);
-    if !measured {
-        return;
-    }
-    let pad = extent.cy / 2;
-    let size = (extent.cx + pad * 2, extent.cy + pad);
-    let screen = monitor
-        .and_then(|(m, _)| m.intersect(bounds))
-        .unwrap_or(bounds);
-    let (x, y) = readout_position(rect, screen, size, pad / 2 + 2);
-    text.push(0);
-    let _ = SetWindowTextW(readout, windows::core::PCWSTR(text.as_ptr()));
-    let _ = SetWindowPos(
-        readout,
-        HWND_TOPMOST,
-        x,
-        y,
-        size.0,
-        size.1,
-        SWP_NOACTIVATE | SWP_SHOWWINDOW,
-    );
-    let _ = InvalidateRect(readout, None, false);
+    READOUT.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        if cell.as_ref().is_none_or(|s| s.dpi != dpi) {
+            if let Some(old) = cell.take() {
+                let _ = DeleteObject(old.font);
+            }
+            *cell = Some(ReadoutState {
+                dpi,
+                font: readout_font(dpi),
+                measured: None,
+                text: Vec::new(),
+                place: (0, 0, 0, 0),
+            });
+        }
+        let Some(state) = cell.as_mut() else {
+            return;
+        };
+        let size = match state.measured {
+            Some((chars, size)) if chars == text.len() => size,
+            _ => {
+                let dc = GetDC(readout);
+                if dc.is_invalid() {
+                    return;
+                }
+                let old = SelectObject(dc, state.font);
+                let mut extent = windows::Win32::Foundation::SIZE::default();
+                let measured = GetTextExtentPoint32W(dc, &text, &mut extent).as_bool();
+                SelectObject(dc, old);
+                ReleaseDC(readout, dc);
+                if !measured {
+                    return;
+                }
+                let pad = extent.cy / 2;
+                let size = (extent.cx + pad * 2, extent.cy + pad);
+                state.measured = Some((text.len(), size));
+                size
+            }
+        };
+        let screen = monitor
+            .and_then(|(m, _)| m.intersect(bounds))
+            .unwrap_or(bounds);
+        let gap = size.1 / 6 + 2;
+        let (x, y) = readout_position(rect, screen, size, gap);
+        let place = (x, y, size.0, size.1);
+        if text != state.text {
+            let mut terminated = text.clone();
+            terminated.push(0);
+            let _ = SetWindowTextW(readout, windows::core::PCWSTR(terminated.as_ptr()));
+            let _ = InvalidateRect(readout, None, false);
+            state.text = text;
+        }
+        if place != state.place {
+            let _ = SetWindowPos(
+                readout,
+                HWND_TOPMOST,
+                x,
+                y,
+                size.0,
+                size.1,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            );
+            state.place = place;
+        }
+    });
 }
 
 unsafe fn paint_readout(hwnd: HWND, dc: HDC) {
@@ -335,7 +413,10 @@ unsafe fn paint_readout(hwnd: HWND, dc: HDC) {
     let _ = DeleteObject(background);
     let mut text = [0u16; 32];
     let len = GetWindowTextW(hwnd, &mut text).max(0) as usize;
-    let font = readout_font(GetDpiForWindow(hwnd));
+    // The picker's cached font; a stray paint without one draws nothing.
+    let Some(font) = READOUT.with(|r| r.borrow().as_ref().map(|s| s.font)) else {
+        return;
+    };
     let old = SelectObject(dc, font);
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, COLORREF(0x00FF_FFFF));
@@ -346,7 +427,6 @@ unsafe fn paint_readout(hwnd: HWND, dc: HDC) {
         DT_CENTER | DT_VCENTER | DT_SINGLELINE,
     );
     SelectObject(dc, old);
-    let _ = DeleteObject(font);
 }
 
 unsafe extern "system" fn readout_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -649,7 +729,10 @@ fn select(
         let _ = ShowWindow(veil, SW_HIDE);
         let _ = ShowWindow(frozen.0, SW_HIDE);
         let _ = DestroyWindow(border);
-        let _ = DestroyWindow(state.readout);
+        // Hidden above; destroyed after the copy (release_leftovers).
+        release_leftovers();
+        LEFTOVER.with(|l| l.set(state.readout));
+        forget_readout();
         let _ = DestroyWindow(veil);
         drop(frozen);
         if surface.paint_failed {

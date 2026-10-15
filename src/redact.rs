@@ -67,8 +67,12 @@ fn is_email(text: &str) -> bool {
     let Some((name, tld)) = domain.rsplit_once('.') else {
         return false;
     };
+    let label = name.rsplit('.').next().unwrap_or(name);
     !user.is_empty()
-        && !name.is_empty()
+        && label
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic())
         && tld.len() >= 2
         && tld.chars().all(|c| c.is_ascii_alphabetic())
 }
@@ -97,6 +101,7 @@ fn is_key(text: &str) -> bool {
         return true;
     }
     text.len() >= 20
+        && text.chars().filter(|c| "-_+/=.".contains(*c)).count() <= 2
         && text.chars().any(|c| c.is_ascii_digit())
         && text.chars().any(|c| c.is_ascii_alphabetic())
 }
@@ -146,19 +151,41 @@ fn is_amount(text: &str) -> bool {
     if text.contains(['$', '€', '£', '¥']) {
         return true;
     }
-    let whole = text.split('.').next().unwrap_or("");
-    let groups: Vec<&str> = whole.split(',').collect();
-    groups.len() >= 2
-        && (1..=3).contains(&groups[0].len())
-        && groups[1..].iter().all(|g| g.len() == 3)
-        && groups.iter().all(|g| g.chars().all(|c| c.is_ascii_digit()))
+    // Drop a decimal part of one or two digits after the last . or , then
+    // the rest must be thousands groups split by one kind of separator.
+    let whole = match text.rfind(['.', ',']) {
+        Some(i) if (1..=2).contains(&(text.len() - i - 1)) => &text[..i],
+        _ => text,
+    };
+    [',', '.'].iter().any(|sep| {
+        let groups: Vec<&str> = whole.split(*sep).collect();
+        groups.len() >= 2
+            && (1..=3).contains(&groups[0].len())
+            && groups[1..].iter().all(|g| g.len() == 3)
+            && groups.iter().all(|g| g.chars().all(|c| c.is_ascii_digit()))
+    })
+}
+
+/// Timestamps ("2026-10-14T22") and sizes ("1920x1080") are not private.
+fn is_time_or_size(text: &str) -> bool {
+    if let Some((date, _)) = text.split_once(['T', 't']) {
+        if is_date(date) {
+            return true;
+        }
+    }
+    text.split_once(['x', 'X', '\u{d7}']).is_some_and(|(a, b)| {
+        !a.is_empty()
+            && !b.is_empty()
+            && a.chars().all(|c| c.is_ascii_digit())
+            && b.chars().all(|c| c.is_ascii_digit())
+    })
 }
 
 /// Account numbers, references and IDs in one piece: seven or more digits,
 /// alone or with a short letter prefix ("ACC12345678", "INV-2026-0001234").
 fn is_long_number(text: &str) -> bool {
     let text = core(text);
-    if is_date(text) || is_amount(text) {
+    if is_date(text) || is_amount(text) || is_time_or_size(text) {
         return false;
     }
     let digits = text.chars().filter(char::is_ascii_digit).count();
@@ -184,6 +211,8 @@ struct Run {
     digits: usize,
     words: usize,
     longest: usize,
+    /// Every part looked like a year (1900 to 2099).
+    years: bool,
 }
 
 /// Areas to pixelate. Number runs may span several words on one line
@@ -194,7 +223,7 @@ pub fn private_areas(words: &[Word]) -> Vec<Area> {
     let mut run: Option<Run> = None;
     let flush = |run: &mut Option<Run>, areas: &mut Vec<Area>| {
         if let Some(r) = run.take() {
-            if r.digits >= 7 && (r.words == 1 || r.longest >= 3) {
+            if r.digits >= 7 && !r.years && (r.words == 1 || r.longest >= 4) {
                 areas.push(r.area);
             }
         }
@@ -203,19 +232,22 @@ pub fn private_areas(words: &[Word]) -> Vec<Area> {
         let number =
             number_part(&word.text).filter(|_| !is_date(&word.text) && !is_amount(&word.text));
         if let Some(digits) = number {
-            // A gap wider than a few spaces starts a separate number, such as
-            // the next column of a table.
-            if run.is_some_and(|r| {
-                r.line != word.line || word.x - (r.area.x + r.area.w) > word.h * 0.6
-            }) {
+            // A gap wider than about one character starts a separate
+            // number, such as the next column of a table. OCR boxes hug the
+            // digits, so one space can be most of a box height.
+            if run.is_some_and(|r| r.line != word.line || word.x - (r.area.x + r.area.w) > word.h) {
                 flush(&mut run, &mut areas);
             }
+            let year = core(&word.text)
+                .parse::<u32>()
+                .is_ok_and(|y| (1900..=2099).contains(&y));
             run = Some(match run {
                 Some(r) => Run {
                     area: r.area.union(Area::of(word)),
                     digits: r.digits + digits,
                     words: r.words + 1,
                     longest: r.longest.max(digits),
+                    years: r.years && year,
                     ..r
                 },
                 None => Run {
@@ -224,8 +256,13 @@ pub fn private_areas(words: &[Word]) -> Vec<Area> {
                     digits,
                     words: 1,
                     longest: digits,
+                    years: year,
                 },
             });
+            // A comma or semicolon ends a list item, not a phone number group.
+            if word.text.trim_end().ends_with([',', ';']) {
+                flush(&mut run, &mut areas);
+            }
             continue;
         }
         flush(&mut run, &mut areas);
@@ -321,11 +358,32 @@ mod tests {
             line(0, &["Pages", "1", "2", "3", "4", "5", "6", "7"]),
             line(0, &["At", "10:45:30"]),
             line(0, &["https://example.com/docs/page"]),
+            line(
+                0,
+                &["https://site.com/blog/10-best-practices-for-cloud-security-in-2026"],
+            ),
+            line(0, &["Logged", "2026-10-14T22:11:13Z"]),
+            line(0, &["In", "2019,", "2020,", "2021"]),
+            line(0, &["FY", "2023", "2024"]),
+            line(0, &["Scores", "100", "250", "300"]),
+            line(0, &["Summe", "1.234.567,89"]),
+            line(0, &["Display", "1920x1080"]),
+            line(0, &["File", "logo@2x.png"]),
             line(0, &["supercalifragilisticexpialidocious"]),
             line(0, &["user@localhost"]),
         ] {
             assert!(private_areas(&words).is_empty(), "{words:?}");
         }
+    }
+
+    #[test]
+    fn monospace_spacing_still_joins_a_card_number() {
+        // Wider gaps (14 px at 16 px height), as in a terminal font.
+        let mut words = line(0, &["4111", "1111", "1111", "1111"]);
+        for w in &mut words {
+            w.w = 86.;
+        }
+        assert_eq!(found(&words), [(0., 386.)]);
     }
 
     #[test]

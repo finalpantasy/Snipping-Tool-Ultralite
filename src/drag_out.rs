@@ -7,6 +7,32 @@ use std::path::{Path, PathBuf};
 /// upload from the file for a while after the drop.
 const KEEP_FOR: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
+/// Files this process wrote, removed when it exits: a quit should not leave
+/// a private snip behind in Temp.
+static WRITTEN: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+/// Removes the drag files this process wrote, and any older ones.
+pub fn remove_own_files() {
+    let written = std::mem::take(&mut *WRITTEN.lock().unwrap_or_else(|e| e.into_inner()));
+    for path in written {
+        let _ = std::fs::remove_file(path);
+    }
+    remove_old_files(&drag_dir());
+}
+
+/// Whether Esc is held, which means the user cancelled the drag.
+pub fn escape_down() -> bool {
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE};
+        unsafe { GetAsyncKeyState(VK_ESCAPE.0 as i32) < 0 }
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
 /// UL's own folder under Temp, so cleanup never lists the whole Temp folder.
 pub fn drag_dir() -> PathBuf {
     std::env::temp_dir().join("Snipping Tool UL drags")
@@ -60,6 +86,10 @@ pub fn write_drag_file(
         .unwrap_or_else(|| dir.join(format!("{stamp}.png")));
     let png = crate::clipboard_image::encode_png(pixels, width, height)?;
     std::fs::write(&path, png).map_err(|e| format!("Could not write the drag file: {e}"))?;
+    WRITTEN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(path.clone());
     Ok(path)
 }
 

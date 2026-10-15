@@ -910,6 +910,9 @@ impl App {
                     .transpose()
                 })();
                 ready.send(UserEvent::SnipReady(result));
+                // The picker's hidden size label, after the clipboard and the
+                // preview request: its teardown is not on that path.
+                snipping_tool_ul::region_picker::release_leftovers();
                 drop(frozen);
             });
             drop(picker);
@@ -1038,11 +1041,7 @@ impl App {
             .with_resizable(true);
         // The editor is not a drop target, so dragging its image out and
         // letting go over it again counts as "not dropped".
-        #[cfg(target_os = "windows")]
-        let attrs = {
-            use winit::platform::windows::WindowAttributesExtWindows;
-            attrs.with_drag_and_drop(false)
-        };
+        let attrs = snipping_tool_ul::ui::not_a_drop_target(attrs);
         let setup = (|| {
             let window = Arc::new(event_loop.create_window(attrs).map_err(|e| e.to_string())?);
             let surface = snipping_tool_ul::native_surface::Surface::new(window.clone())?;
@@ -1384,8 +1383,9 @@ impl App {
         drop(pixels);
         match result {
             // Nothing took the drop (a sloppy click, or released over UL):
-            // the press was on Copy, so copy.
-            Ok(false) => self.do_copy(),
+            // the press was on Copy, so copy. Esc cancelling the drag does not.
+            Ok(false) if !snipping_tool_ul::drag_out::escape_down() => self.do_copy(),
+            Ok(false) => {}
             Ok(true) => {}
             Err(e) => {
                 tracing::error!("Drag out failed: {e}");
@@ -2244,7 +2244,7 @@ impl Drop for ReadyGuard {
 
 impl ApplicationHandler<UserEvent> for App {
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        snipping_tool_ul::drag_out::remove_old_files(&snipping_tool_ul::drag_out::drag_dir());
+        snipping_tool_ul::drag_out::remove_own_files();
         let deadline = Instant::now() + Duration::from_secs(15);
         snipping_tool_ul::ocr::cancel_pending();
         if let Some(worker) = self.ocr_worker.take() {
@@ -3351,11 +3351,22 @@ impl ApplicationHandler<UserEvent> for App {
                             self.needs_redraw = true;
                         }
                         // Space held over the image: show that a drag will pan.
+                        // The pointer still updates, so a click right after
+                        // releasing Space lands where the pointer is.
                         if self.space_held
                             && !self.editor_pointer_down
                             && self.editor_ui.header.menu == snipping_tool_ul::launcher::Menu::None
                             && snipping_tool_ul::editor_ui::EditorUi::canvas_rect(w, h).contains(p)
                         {
+                            o.last_mouse_pos = self.editor_view.framed_point(
+                                position.x,
+                                position.y,
+                                o.screenshot.width,
+                                o.screenshot.height,
+                                size.width,
+                                size.height,
+                                dpi,
+                            );
                             window.set_cursor(CursorIcon::Grab);
                             consumed = true;
                         } else if (self.editor_ui.header.menu
@@ -4683,6 +4694,10 @@ fn run_tray_app(config: Config, show_home: bool) {
         let _ = menu_proxy.send_event(UserEvent::Menu(event));
     }));
     start_update_check(&config, &proxy);
+    // Drag files left by a crash or an earlier session; off the start path.
+    snipping_tool_ul::background::spawn(|| {
+        snipping_tool_ul::drag_out::remove_old_files(&snipping_tool_ul::drag_out::drag_dir());
+    });
     let mut app = App::new(config, proxy);
     app.show_home_on_start = show_home;
     if let Err(e) = event_loop.run_app(&mut app) {
