@@ -127,7 +127,14 @@ pub fn repeat_binding(capture: &str) -> Option<String> {
     } else {
         return None;
     }
-    let key = capture.rsplit('+').next()?.trim();
+    // The key may be written anywhere ("S+Ctrl+Shift"); it is the one part
+    // that is not a modifier name.
+    let key = capture.split('+').map(str::trim).find(|part| {
+        !matches!(
+            part.to_lowercase().as_str(),
+            "ctrl" | "control" | "shift" | "alt" | "super" | "meta" | "win"
+        )
+    })?;
     let mut parts: Vec<&str> = Vec::new();
     for (flag, label) in [
         (Modifiers::CONTROL, "Ctrl"),

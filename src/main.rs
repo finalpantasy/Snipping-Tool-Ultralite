@@ -848,18 +848,20 @@ impl App {
                             let _ = windows::Win32::Graphics::Dwm::DwmFlush();
                         }
                     }
-                    let windows = if repeat.is_none() && matches!(mode, CaptureMode::Window) {
+                    let windows = if matches!(mode, CaptureMode::Window) {
                         snipping_tool_ul::window_detect::enumerate_window_rects()
                     } else {
                         Vec::new()
                     };
                     let snapshot: &capture::BgraSnapshot = frozen
                         .insert(capture::capture_frozen_desktop().map_err(|e| e.to_string())?);
+                    // A display change can move or remove the old area; when
+                    // nothing of it is left, the ordinary picker runs instead.
+                    let repeat = repeat
+                        .and_then(|r| r.intersect(snapshot.bounds()))
+                        .filter(|r| r.width > 0 && r.height > 0);
                     let rect = match mode {
-                        // A display change can move or remove the old area.
-                        _ if repeat.is_some() => Ok(repeat
-                            .and_then(|r| r.intersect(snapshot.bounds()))
-                            .filter(|r| r.width > 0 && r.height > 0)),
+                        _ if repeat.is_some() => Ok(repeat),
                         CaptureMode::Region => {
                             snipping_tool_ul::region_picker::select_region(snapshot)
                         }

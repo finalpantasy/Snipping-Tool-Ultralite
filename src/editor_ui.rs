@@ -638,9 +638,9 @@ impl EditorUi {
         let tw = ui::measure(&size, 11. * dpi) / dpi;
         c.label(w - 22. - tw, h - 25., &size, 11., ui::muted());
         let help = if state.active_tool == crate::tools::ToolKind::Select {
-            "Scroll to zoom · Space+drag to pan · Tap Space to fit"
+            "Scroll to zoom · Hold Space and click-drag to pan · Tap Space to fit"
         } else {
-            "Scroll to zoom · Space+drag to pan"
+            "Scroll to zoom · Hold Space and click-drag to pan"
         };
         let hw = ui::measure(help, 10.5 * dpi) / dpi;
         let status_w = if status.trim().is_empty() {

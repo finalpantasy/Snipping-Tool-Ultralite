@@ -91,6 +91,11 @@ fn repeat_shortcut_adds_one_modifier_to_the_capture_shortcut() {
     );
     assert_eq!(repeat_binding("Ctrl+Shift+Alt+S"), None);
     assert_eq!(repeat_binding("nonsense"), None);
+    // The key can come first in a hand-edited config.
+    assert_eq!(
+        repeat_binding("S+Ctrl+Shift").as_deref(),
+        Some("Ctrl+Shift+Alt+S")
+    );
     for capture in [
         "Ctrl+Shift+S",
         "ctrl+f9",

@@ -4,7 +4,7 @@ use tray_icon::{Icon, TrayIconBuilder};
 pub struct TrayState {
     pub capture_id: tray_icon::menu::MenuId,
     capture_item: MenuItem,
-    /// Snips the previous area again; disabled until its shortcut exists.
+    /// Snips the previous area again; with no previous snip, a normal capture.
     pub repeat_id: tray_icon::menu::MenuId,
     repeat_item: MenuItem,
     pub window_capture_id: tray_icon::menu::MenuId,

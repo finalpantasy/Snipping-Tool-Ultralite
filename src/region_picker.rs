@@ -199,9 +199,9 @@ unsafe fn update_selection(hwnd: HWND, state: &Picker, end: (i32, i32)) {
     show_readout(state.readout, rect, state.bounds);
 }
 
-/// The readout's font at the window's current DPI: 9 pt Segoe UI.
-unsafe fn readout_font(hwnd: HWND) -> HFONT {
-    let dpi = GetDpiForWindow(hwnd).max(96) as i32;
+/// The readout's font at `dpi`: 9 pt Segoe UI.
+unsafe fn readout_font(dpi: u32) -> HFONT {
+    let dpi = dpi.max(96) as i32;
     CreateFontW(
         -(9 * dpi / 72),
         0,
@@ -252,11 +252,12 @@ fn readout_position(
     (x, y.min(bottom - h).max(bounds.y))
 }
 
-/// The monitor holding the selection's bottom-right corner.
-unsafe fn monitor_of(rect: ScreenRect) -> Option<ScreenRect> {
+/// The monitor holding the selection's bottom-right corner, and its DPI.
+unsafe fn monitor_of(rect: ScreenRect) -> Option<(ScreenRect, u32)> {
     use windows::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
+    use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
     let corner = POINT {
         x: rect.x + rect.width as i32 - 1,
         y: rect.y + rect.height as i32 - 1,
@@ -269,13 +270,18 @@ unsafe fn monitor_of(rect: ScreenRect) -> Option<ScreenRect> {
     if !GetMonitorInfoW(monitor, &mut info).as_bool() {
         return None;
     }
+    let (mut dpi, mut _dpi_y) = (96, 96);
+    let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut _dpi_y);
     let r = info.rcMonitor;
-    Some(ScreenRect {
-        x: r.left,
-        y: r.top,
-        width: (r.right - r.left).max(0) as u32,
-        height: (r.bottom - r.top).max(0) as u32,
-    })
+    Some((
+        ScreenRect {
+            x: r.left,
+            y: r.top,
+            width: (r.right - r.left).max(0) as u32,
+            height: (r.bottom - r.top).max(0) as u32,
+        },
+        dpi,
+    ))
 }
 
 unsafe fn show_readout(readout: HWND, rect: ScreenRect, bounds: ScreenRect) {
@@ -283,11 +289,15 @@ unsafe fn show_readout(readout: HWND, rect: ScreenRect, bounds: ScreenRect) {
         return;
     }
     let mut text = readout_text(rect);
+    // Size the label for the monitor it is about to move to, which is the
+    // DPI it will paint with there.
+    let monitor = monitor_of(rect);
+    let dpi = monitor.map_or_else(|| GetDpiForWindow(readout), |(_, dpi)| dpi);
     let dc = GetDC(readout);
     if dc.is_invalid() {
         return;
     }
-    let font = readout_font(readout);
+    let font = readout_font(dpi);
     let old = SelectObject(dc, font);
     let mut extent = windows::Win32::Foundation::SIZE::default();
     let measured = GetTextExtentPoint32W(dc, &text, &mut extent).as_bool();
@@ -299,8 +309,8 @@ unsafe fn show_readout(readout: HWND, rect: ScreenRect, bounds: ScreenRect) {
     }
     let pad = extent.cy / 2;
     let size = (extent.cx + pad * 2, extent.cy + pad);
-    let screen = monitor_of(rect)
-        .and_then(|m| m.intersect(bounds))
+    let screen = monitor
+        .and_then(|(m, _)| m.intersect(bounds))
         .unwrap_or(bounds);
     let (x, y) = readout_position(rect, screen, size, pad / 2 + 2);
     text.push(0);
@@ -325,7 +335,7 @@ unsafe fn paint_readout(hwnd: HWND, dc: HDC) {
     let _ = DeleteObject(background);
     let mut text = [0u16; 32];
     let len = GetWindowTextW(hwnd, &mut text).max(0) as usize;
-    let font = readout_font(hwnd);
+    let font = readout_font(GetDpiForWindow(hwnd));
     let old = SelectObject(dc, font);
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, COLORREF(0x00FF_FFFF));
