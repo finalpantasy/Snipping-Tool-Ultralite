@@ -2,6 +2,8 @@
 
 <h1 align="center">Snipping Tool UL</h1>
 
+<p align="center"><a href="https://ko-fi.com/finalpantasy"><img src="https://img.shields.io/badge/Ko--fi-buy%20me%20a%20coffee-FF5E5B?logo=ko-fi&logoColor=white" alt="Support me on Ko-fi"></a></p>
+
 <p align="center"><b>A faster, lighter Snipping Tool for Windows 11.</b><br>Snip it, mark it up, paste it. Free and open source.</p>
 
 <p align="center">
@@ -118,3 +120,7 @@ Found a bug? [Open an issue](https://github.com/finalpantasy/Snipping-Tool-Ultra
 ## Credits
 
 Snipping Tool UL is based on the MIT-licensed [HydroShot](https://github.com/Real-Fruit-Snacks/HydroShot). Attribution is kept in [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
+
+## Support
+
+Free hobby project. If it helps you, you can [buy me a coffee on Ko-fi](https://ko-fi.com/finalpantasy). Thank you!
