@@ -15,6 +15,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::*;
+use std::sync::atomic::{AtomicIsize, Ordering};
 
 struct FrozenSurface<'a> {
     screen: &'a BgraSnapshot,
@@ -534,6 +535,52 @@ unsafe extern "system" fn picker_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
     DefWindowProcW(hwnd, msg, wp, lp)
 }
 
+/// Veil HWND the keyboard hook posts Esc to; 0 while no picker is open.
+static HOOK_VEIL: AtomicIsize = AtomicIsize::new(0);
+
+/// Low-level hook active while the picker runs. Windows may refuse the veil
+/// foreground (focus rules), so a plain WM_KEYDOWN would reach another app.
+unsafe extern "system" fn esc_hook_proc(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    if code == HC_ACTION as i32 {
+        let key = &*(lp.0 as *const KBDLLHOOKSTRUCT);
+        if key.vkCode == 0x1b {
+            if wp.0 as u32 == WM_KEYDOWN || wp.0 as u32 == WM_SYSKEYDOWN {
+                let veil = HOOK_VEIL.load(Ordering::SeqCst);
+                if veil != 0 {
+                    // Same cancellation as the window's own Esc handling.
+                    let _ = PostMessageW(HWND(veil as _), WM_KEYDOWN, WPARAM(0x1b), LPARAM(0));
+                }
+            }
+            // Swallow the whole Esc press (down and up) while the picker is open.
+            return LRESULT(1);
+        }
+    }
+    CallNextHookEx(None, code, wp, lp)
+}
+
+/// Unhooks and clears the veil on drop, so every exit path releases the hook.
+struct EscHook(HHOOK);
+
+impl EscHook {
+    fn install(veil: HWND, instance: HINSTANCE) -> Option<Self> {
+        HOOK_VEIL.store(veil.0 as isize, Ordering::SeqCst);
+        match unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(esc_hook_proc), instance, 0) } {
+            Ok(hook) => Some(Self(hook)),
+            Err(_) => {
+                HOOK_VEIL.store(0, Ordering::SeqCst);
+                None
+            }
+        }
+    }
+}
+
+impl Drop for EscHook {
+    fn drop(&mut self) {
+        HOOK_VEIL.store(0, Ordering::SeqCst);
+        let _ = unsafe { UnhookWindowsHookEx(self.0) };
+    }
+}
+
 unsafe extern "system" fn border_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     DefWindowProcW(hwnd, msg, wp, lp)
 }
@@ -704,6 +751,7 @@ fn select(
         }
         let _ = ShowWindow(veil, SW_SHOW);
         let _ = SetForegroundWindow(veil);
+        let esc_hook = EscHook::install(veil, instance);
         let mut message = MSG::default();
         let mut failed = false;
         loop {
@@ -724,6 +772,7 @@ fn select(
             let _ = TranslateMessage(&message);
             DispatchMessageW(&message);
         }
+        drop(esc_hook);
         let _ = ShowWindow(border, SW_HIDE);
         let _ = ShowWindow(state.readout, SW_HIDE);
         let _ = ShowWindow(veil, SW_HIDE);
