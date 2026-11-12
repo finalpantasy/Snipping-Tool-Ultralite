@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
-use std::sync::{Arc, LazyLock, RwLock};
+use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 
 /// Open Sans, the one typeface for the interface and text annotations.
 pub(crate) static OPEN_SANS: &[u8] = include_bytes!("../assets/font.ttf");
@@ -117,9 +117,17 @@ fn char_map(data: &[u8]) -> Option<Vec<(u32, u16)>> {
 /// subtable appended after the original tables.
 fn build(data: &[u8], map: &[(u32, u16)], blocks: &BTreeSet<u32>) -> Option<fontdue::Font> {
     let be16 = |at: usize| Some(u16::from_be_bytes(data.get(at..at + 2)?.try_into().ok()?));
-    let tables = be16(4)? as usize;
+    let be32 = |at: usize| Some(u32::from_be_bytes(data.get(at..at + 4)?.try_into().ok()?));
+    // A collection's first font keeps its table directory where the header
+    // says; its table offsets still count from the start of the file.
+    let directory = if data.get(0..4) == Some(b"ttcf".as_slice()) {
+        be32(12)? as usize
+    } else {
+        0
+    };
+    let tables = be16(directory + 4)? as usize;
     let record = (0..tables)
-        .map(|i| 12 + i * 16)
+        .map(|i| directory + 12 + i * 16)
         .find(|&at| data.get(at..at + 4) == Some(b"cmap".as_slice()))?;
 
     let mut groups: Vec<(u32, u32, u32)> = Vec::new();
@@ -162,3 +170,125 @@ fn build(data: &[u8], map: &[(u32, u16)], blocks: &BTreeSet<u32>) -> Option<font
 
 pub static FONT: LazyLock<LazyFont> =
     LazyLock::new(|| LazyFont::new(OPEN_SANS).expect("Failed to load embedded font"));
+
+/// A Windows font that is read from disk only once text needs a character
+/// Open Sans lacks, such as Japanese, Chinese or Korean typed through an IME.
+pub struct Fallback {
+    path: std::path::PathBuf,
+    font: OnceLock<Option<LazyFont>>,
+}
+
+impl Fallback {
+    pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            font: OnceLock::new(),
+        }
+    }
+
+    fn get(&self) -> Option<&LazyFont> {
+        self.font
+            .get_or_init(|| {
+                let font = std::fs::read(&self.path).ok().and_then(LazyFont::new);
+                if font.is_none() {
+                    tracing::debug!("Fallback font unavailable: {}", self.path.display());
+                }
+                font
+            })
+            .as_ref()
+    }
+}
+
+/// Han characters look different in Japanese, Chinese and Korean, so the
+/// system language picks which font draws them first.
+fn fallback_order(locale: &str) -> [&'static str; 4] {
+    let locale = locale.to_ascii_lowercase();
+    if locale.starts_with("zh") {
+        ["msyh.ttc", "YuGothM.ttc", "malgun.ttf", "seguisym.ttf"]
+    } else if locale.starts_with("ko") {
+        ["malgun.ttf", "YuGothM.ttc", "msyh.ttc", "seguisym.ttf"]
+    } else {
+        ["YuGothM.ttc", "msyh.ttc", "malgun.ttf", "seguisym.ttf"]
+    }
+}
+
+static FALLBACKS: LazyLock<Vec<Fallback>> = LazyLock::new(|| {
+    let fonts = std::env::var_os("WINDIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| "C:\\Windows".into())
+        .join("Fonts");
+    fallback_order(&user_locale())
+        .iter()
+        .map(|name| Fallback::new(fonts.join(name)))
+        .collect()
+});
+
+#[cfg(target_os = "windows")]
+fn user_locale() -> String {
+    let mut name = [0u16; 85];
+    let len = unsafe { windows::Win32::Globalization::GetUserDefaultLocaleName(&mut name) };
+    String::from_utf16_lossy(&name[..(len.max(1) as usize - 1).min(name.len())])
+}
+
+#[cfg(not(target_os = "windows"))]
+fn user_locale() -> String {
+    std::env::var("LANG").unwrap_or_default()
+}
+
+/// The fonts that draw one piece of text: Open Sans, plus any fallback that
+/// supplies characters Open Sans lacks. Same methods as a single font.
+pub struct TextFonts {
+    primary: Arc<fontdue::Font>,
+    extra: Vec<(&'static LazyFont, Arc<fontdue::Font>)>,
+}
+
+impl TextFonts {
+    fn pick(&self, ch: char) -> &fontdue::Font {
+        if !self.extra.is_empty() && !FONT.mapped(ch as u32) {
+            if let Some((_, font)) = self.extra.iter().find(|(lazy, _)| lazy.mapped(ch as u32)) {
+                return font;
+            }
+        }
+        &self.primary
+    }
+
+    pub fn metrics(&self, ch: char, px: f32) -> fontdue::Metrics {
+        self.pick(ch).metrics(ch, px)
+    }
+
+    pub fn rasterize(&self, ch: char, px: f32) -> (fontdue::Metrics, Vec<u8>) {
+        self.pick(ch).rasterize(ch, px)
+    }
+
+    /// Line metrics stay Open Sans's so a line never shifts when a fallback
+    /// character is typed into it.
+    pub fn horizontal_line_metrics(&self, px: f32) -> Option<fontdue::LineMetrics> {
+        self.primary.horizontal_line_metrics(px)
+    }
+}
+
+pub fn text_fonts(text: &str) -> TextFonts {
+    text_fonts_from(text, &FALLBACKS)
+}
+
+pub fn text_fonts_from(text: &str, fallbacks: &'static [Fallback]) -> TextFonts {
+    let primary = FONT.for_text(text);
+    let mut missing: Vec<char> = text
+        .chars()
+        .filter(|ch| !ch.is_control() && !ch.is_whitespace() && !FONT.mapped(*ch as u32))
+        .collect();
+    let mut extra = Vec::new();
+    for fallback in fallbacks {
+        if missing.is_empty() {
+            break;
+        }
+        let Some(lazy) = fallback.get() else { continue };
+        let (mine, rest): (Vec<char>, Vec<char>) =
+            missing.iter().partition(|ch| lazy.mapped(**ch as u32));
+        if !mine.is_empty() {
+            extra.push((lazy, lazy.for_text(&mine.iter().collect::<String>())));
+        }
+        missing = rest;
+    }
+    TextFonts { primary, extra }
+}

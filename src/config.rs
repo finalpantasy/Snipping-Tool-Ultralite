@@ -312,6 +312,23 @@ impl ShortcutsConfig {
         ]
     }
 
+    /// Give `index` the key, swapping with a tool that already has it, so one
+    /// letter never selects two tools.
+    pub fn assign(&mut self, index: usize, key: String) {
+        let entries = self.entries();
+        let Some(previous) = entries.get(index).map(|(_, _, k)| k.to_string()) else {
+            return;
+        };
+        let holder = entries
+            .iter()
+            .enumerate()
+            .position(|(i, (_, _, k))| i != index && k.eq_ignore_ascii_case(&key));
+        if let Some(holder) = holder {
+            self.set_by_index(holder, previous);
+        }
+        self.set_by_index(index, key);
+    }
+
     /// Set shortcut by index (0-13).
     pub fn set_by_index(&mut self, index: usize, key: String) {
         match index {

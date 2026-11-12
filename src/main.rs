@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 use clap::Parser;
 use tray_icon::menu::MenuEvent;
 use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
-use winit::event::{ElementState, MouseButton as WinitMouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{
+    ElementState, Ime, MouseButton as WinitMouseButton, MouseScrollDelta, WindowEvent,
+};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 #[cfg(not(target_os = "windows"))]
@@ -186,6 +188,9 @@ struct App {
     copy_press: Option<Point>,
     /// Space is held in the editor: left-drag pans.
     space_held: bool,
+    /// The window input methods are enabled on and where their candidate
+    /// list was last placed, while text is being typed.
+    ime: Option<(WindowId, [i32; 3])>,
     /// The held Space was used to pan, so releasing it does not fit.
     space_panned: bool,
     registered_hotkey: Option<String>,
@@ -280,6 +285,7 @@ impl App {
             repeat_region: None,
             copy_press: None,
             space_held: false,
+            ime: None,
             space_panned: false,
             registered_hotkey: None,
             idle_trimmed: false,
@@ -781,6 +787,78 @@ impl App {
         self.repeat_region = self.last_region;
         self.start_capture(event_loop, flush);
         self.repeat_region = None;
+    }
+
+    /// Input methods are on only while a text annotation is being typed, so
+    /// tool letters and shortcuts never go to an IME, and the candidate list
+    /// follows the text caret.
+    fn sync_ime(&mut self) {
+        let Some(window) = self.overlay_window.clone() else {
+            self.ime = None;
+            return;
+        };
+        let typing = match &self.state {
+            AppState::Capturing(o) if o.text_input_active => Some(o),
+            _ => None,
+        };
+        let Some(o) = typing else {
+            if self.ime.take().is_some_and(|(id, _)| id == window.id()) {
+                window.set_ime_allowed(false);
+            }
+            return;
+        };
+        let size = window.inner_size();
+        let (scale, ox, oy) = if self.is_preview {
+            let l = self.editor_view.framed_layout(
+                o.screenshot.width,
+                o.screenshot.height,
+                size.width,
+                size.height,
+                window.scale_factor(),
+            );
+            (l.scale, l.x, l.y)
+        } else {
+            (1., 0., 0.)
+        };
+        let width = snipping_tool_ul::tools::measure_text_width(
+            &o.text_input_display(),
+            o.text_input_font_size,
+        );
+        let area = [
+            (ox + f64::from(o.text_input_position.x + width) * scale).round() as i32,
+            (oy + f64::from(o.text_input_position.y) * scale).round() as i32,
+            (f64::from(o.text_input_font_size) * scale).round().max(1.) as i32,
+        ];
+        if self
+            .ime
+            .is_some_and(|(id, at)| id == window.id() && at == area)
+        {
+            return;
+        }
+        if self.ime.is_none_or(|(id, _)| id != window.id()) {
+            window.set_ime_allowed(true);
+        }
+        window.set_ime_cursor_area(
+            winit::dpi::PhysicalPosition::new(area[0], area[1]),
+            winit::dpi::PhysicalSize::new(1, area[2] as u32),
+        );
+        self.ime = Some((window.id(), area));
+    }
+
+    fn is_countdown_escape(&self, id: u32) -> bool {
+        self.countdown
+            .as_ref()
+            .and_then(Countdown::escape_hotkey_id)
+            .is_some_and(|escape| escape == id)
+    }
+
+    /// Cancel a delayed capture and bring back the canvas it hid, keeping the image.
+    fn cancel_countdown(&mut self, event_loop: &ActiveEventLoop) {
+        self.countdown = None;
+        self.capture_at = None;
+        if std::mem::take(&mut self.restore_home_on_cancel) {
+            self.restore_capture_canvas(event_loop);
+        }
     }
 
     /// Returns whether any UL window was on screen and has just been hidden.
@@ -2445,6 +2523,10 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::Tray(event) => self.pending_tray.push(event),
             UserEvent::Hotkey(event) => {
                 if event.state == global_hotkey::HotKeyState::Pressed
+                    && self.is_countdown_escape(event.id)
+                {
+                    self.cancel_countdown(event_loop);
+                } else if event.state == global_hotkey::HotKeyState::Pressed
                     && Some(event.id) == self.hotkey_id
                 {
                     // While Settings is recording a new shortcut, the registered
@@ -3111,23 +3193,14 @@ impl ApplicationHandler<UserEvent> for App {
             if cd.window_id() == _window_id {
                 match event {
                     WindowEvent::CloseRequested => {
-                        self.countdown = None;
-                        self.capture_at = None; // cancel the delayed capture
-                        if std::mem::take(&mut self.restore_home_on_cancel) {
-                            self.restore_capture_canvas(_event_loop);
-                        }
+                        self.cancel_countdown(_event_loop);
                         return;
                     }
                     WindowEvent::KeyboardInput { ref event, .. }
                         if event.state == ElementState::Pressed
                             && event.logical_key == Key::Named(NamedKey::Escape) =>
                     {
-                        self.countdown = None;
-                        self.capture_at = None;
-                        // Restore the canvas without discarding the previous image.
-                        if std::mem::take(&mut self.restore_home_on_cancel) {
-                            self.restore_capture_canvas(_event_loop);
-                        }
+                        self.cancel_countdown(_event_loop);
                         return;
                     }
                     WindowEvent::RedrawRequested => {
@@ -3645,6 +3718,26 @@ impl ApplicationHandler<UserEvent> for App {
                 self.modifiers = mods.state();
             }
 
+            WindowEvent::Ime(ime) => {
+                if overlay.text_input_active {
+                    match ime {
+                        Ime::Preedit(text, _) => overlay.text_preedit = text,
+                        Ime::Commit(text) => {
+                            overlay.text_preedit.clear();
+                            overlay
+                                .text_input_buffer
+                                .push_str(&text.replace(['\r', '\n'], " "));
+                        }
+                        Ime::Disabled => overlay.text_preedit.clear(),
+                        Ime::Enabled => {}
+                    }
+                    self.needs_redraw = true;
+                    if let Some(w) = &self.overlay_window {
+                        w.request_redraw();
+                    }
+                }
+            }
+
             WindowEvent::KeyboardInput {
                 event,
                 is_synthetic,
@@ -3718,6 +3811,11 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 // --- Text input guard: MUST be first ---
                 if overlay.text_input_active {
+                    // While an IME composes, Enter, Escape and Backspace are its
+                    // keys; the finished text arrives as an Ime::Commit.
+                    if !overlay.text_preedit.is_empty() {
+                        return;
+                    }
                     let ctrl = self.modifiers.control_key();
                     match &event.logical_key {
                         Key::Character(ch) if ctrl && ch.as_str().eq_ignore_ascii_case("v") => {
@@ -3759,6 +3857,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 overlay.annotations.insert(idx, old_ann);
                             }
                             overlay.text_input_buffer.clear();
+                            overlay.text_preedit.clear();
                             overlay.text_input_active = false;
                             self.needs_redraw = true;
                         }
@@ -4515,10 +4614,15 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.process_tray_events(event_loop);
+        self.sync_ime();
 
         // Drain ALL pending hotkey events, not just one per wakeup
         while let Ok(event) = global_hotkey::GlobalHotKeyEvent::receiver().try_recv() {
             if event.state == global_hotkey::HotKeyState::Pressed
+                && self.is_countdown_escape(event.id)
+            {
+                self.cancel_countdown(event_loop);
+            } else if event.state == global_hotkey::HotKeyState::Pressed
                 && Some(event.id) == self.hotkey_id
             {
                 tracing::info!("Global hotkey pressed — triggering capture");

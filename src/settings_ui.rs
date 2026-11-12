@@ -657,7 +657,7 @@ impl SettingsUi {
     pub fn on_key_press(&mut self, key: &str) -> bool {
         if let Some(idx) = self.editing_shortcut {
             if !key.is_empty() {
-                self.config.shortcuts.set_by_index(idx, key.to_string());
+                self.config.shortcuts.assign(idx, key.to_string());
             }
             self.editing_shortcut = None;
             self.needs_redraw = true;

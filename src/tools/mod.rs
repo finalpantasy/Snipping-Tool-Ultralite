@@ -842,7 +842,7 @@ pub fn render_annotation(
 /// Measure the rendered width of single-line text using the embedded font's
 /// advance metrics — matches exactly what `render_text_annotation` produces.
 pub fn measure_text_width(text: &str, font_size: f32) -> f32 {
-    let font = crate::font::FONT.for_text(text);
+    let font = crate::font::text_fonts(text);
     text.chars()
         .map(|ch| font.metrics(ch, font_size).advance_width)
         .sum()
@@ -856,7 +856,7 @@ pub fn measure_text_height(font_size: f32) -> f32 {
         .unwrap_or(font_size)
 }
 pub fn text_ink_bounds(text: &str, size: f32) -> (f32, f32, f32, f32) {
-    let font = crate::font::FONT.for_text(text);
+    let font = crate::font::text_fonts(text);
     let ascent = font
         .horizontal_line_metrics(size)
         .map_or(size, |m| m.ascent);
@@ -894,7 +894,7 @@ pub fn render_text_annotation(
     color: &Color,
     font_size: f32,
 ) {
-    let font = crate::font::FONT.for_text(text);
+    let font = crate::font::text_fonts(text);
 
     let pw = pixmap.width() as i32;
     let ph = pixmap.height() as i32;
@@ -1101,7 +1101,7 @@ pub fn hit_test_annotation(annotation: &Annotation, point: &Point, threshold: f3
             text,
             ..
         } => {
-            let font = crate::font::FONT.for_text(text);
+            let font = crate::font::text_fonts(text);
             let text_width: f32 = text
                 .chars()
                 .map(|c| font.metrics(c, *font_size).advance_width)

@@ -366,13 +366,13 @@ pub fn cap_centered_top(middle: f32, size: f32, scale: f32) -> f32 {
     (baseline - ascent) / scale
 }
 pub fn measure(text: &str, size: f32) -> f32 {
-    let font = crate::font::FONT.for_text(text);
+    let font = crate::font::text_fonts(text);
     text.chars()
         .map(|ch| font.metrics(ch, size).advance_width)
         .sum()
 }
 pub fn text_bounds(text: &str, size: f32) -> (f32, f32, f32, f32) {
-    let font = crate::font::FONT.for_text(text);
+    let font = crate::font::text_fonts(text);
     let ascent = font
         .horizontal_line_metrics(size)
         .map_or(size, |m| m.ascent);
@@ -400,7 +400,7 @@ pub fn text_bounds(text: &str, size: f32) -> (f32, f32, f32, f32) {
     }
 }
 pub(crate) fn draw_text(p: &mut Pixmap, pos: Point, text: &str, size: f32, rgb: (u8, u8, u8)) {
-    let font = crate::font::FONT.for_text(text);
+    let font = crate::font::text_fonts(text);
     let ascent = font
         .horizontal_line_metrics(size)
         .map_or(size, |m| m.ascent);

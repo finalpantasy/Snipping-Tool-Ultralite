@@ -47,6 +47,9 @@ pub struct OverlayState {
     pub measurement_tool: MeasurementTool,
     pub text_input_active: bool,
     pub text_input_buffer: String,
+    /// Text an input method is still composing. Drawn after the buffer but
+    /// never committed: the IME sends the final text as a commit.
+    pub text_preedit: String,
     pub text_input_position: Point,
     pub text_input_font_size: f32,
     /// When re-editing an existing Text annotation: its original index and
@@ -174,7 +177,18 @@ impl OverlayState {
             );
         }
         self.text_input_active = false;
+        self.text_preedit.clear();
     }
+
+    /// The text shown while typing: what is entered plus any IME composition.
+    pub fn text_input_display(&self) -> std::borrow::Cow<'_, str> {
+        if self.text_preedit.is_empty() {
+            std::borrow::Cow::Borrowed(&self.text_input_buffer)
+        } else {
+            std::borrow::Cow::Owned(format!("{}{}", self.text_input_buffer, self.text_preedit))
+        }
+    }
+
     pub fn new(screenshot: CapturedScreen, config: &crate::config::Config) -> Self {
         let color = config.default_color();
         let thickness = config.clamped_thickness();
@@ -203,6 +217,7 @@ impl OverlayState {
             measurement_tool: MeasurementTool::new(color),
             text_input_active: false,
             text_input_buffer: String::new(),
+            text_preedit: String::new(),
             text_input_position: Point::new(0.0, 0.0),
             text_input_font_size: 20.0,
             text_edit_origin: None,

@@ -18,6 +18,36 @@ pub struct Countdown {
     remaining: u32,
     next_tick: Instant,
     deadline: Instant,
+    escape: Option<(
+        global_hotkey::GlobalHotKeyManager,
+        global_hotkey::hotkey::HotKey,
+    )>,
+}
+
+/// The countdown never takes focus (that would close the menu being
+/// captured), so Escape reaches it only as a global key held for the
+/// countdown's few seconds. Another app owning Escape just leaves click-to-cancel.
+fn register_escape() -> Option<(
+    global_hotkey::GlobalHotKeyManager,
+    global_hotkey::hotkey::HotKey,
+)> {
+    let manager = global_hotkey::GlobalHotKeyManager::new().ok()?;
+    let key = global_hotkey::hotkey::HotKey::new(None, global_hotkey::hotkey::Code::Escape);
+    match manager.register(key) {
+        Ok(()) => Some((manager, key)),
+        Err(e) => {
+            tracing::debug!("Countdown Escape unavailable: {e}");
+            None
+        }
+    }
+}
+
+impl Drop for Countdown {
+    fn drop(&mut self) {
+        if let Some((manager, key)) = self.escape.take() {
+            let _ = manager.unregister(key);
+        }
+    }
 }
 
 impl Countdown {
@@ -81,6 +111,7 @@ impl Countdown {
             remaining: seconds,
             next_tick: (started + Duration::from_secs(1)).min(deadline),
             deadline,
+            escape: register_escape(),
         };
         cd.render();
         Some(cd)
@@ -88,6 +119,11 @@ impl Countdown {
 
     pub fn window_id(&self) -> WindowId {
         self.window.id()
+    }
+
+    /// The id of the global Escape key held while this countdown runs.
+    pub fn escape_hotkey_id(&self) -> Option<u32> {
+        self.escape.as_ref().map(|(_, key)| key.id())
     }
 
     /// The instant at which the next second elapses.

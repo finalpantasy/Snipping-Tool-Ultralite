@@ -506,6 +506,25 @@ pub fn with_image_extension(path: std::path::PathBuf) -> std::path::PathBuf {
     name.into()
 }
 
+/// JPEG has no alpha. Dropping it shows whatever color a transparent pixel
+/// stores, usually black, so composite over white the way Paint does.
+pub fn rgb_on_white(img: &image::RgbaImage) -> image::RgbImage {
+    let (w, h) = img.dimensions();
+    let mut rgb = Vec::with_capacity(w as usize * h as usize * 3);
+    for p in img.as_raw().chunks_exact(4) {
+        let a = u32::from(p[3]);
+        if a == 255 {
+            rgb.extend_from_slice(&p[..3]);
+        } else {
+            let white = 255 * (255 - a);
+            for &c in &p[..3] {
+                rgb.push(((u32::from(c) * a + white + 127) / 255) as u8);
+            }
+        }
+    }
+    image::RgbImage::from_raw(w, h, rgb).expect("three bytes per pixel")
+}
+
 /// Encode an explicit, already chosen path. No dialog is opened here.
 pub fn save_image_to_path(
     pixels: Vec<u8>,
@@ -527,7 +546,7 @@ pub fn save_image_to_path(
         let mut writer = std::io::BufWriter::new(file);
         if ext == "jpg" || ext == "jpeg" {
             // The crate default (75, subsampled) smears text edges in screenshots.
-            let rgb = image::DynamicImage::ImageRgba8(img).to_rgb8();
+            let rgb = rgb_on_white(&img);
             image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, 92)
                 .encode_image(&rgb)
                 .map_err(|e| e.to_string())?;
