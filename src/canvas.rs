@@ -123,7 +123,7 @@ pub fn bounds(width: u32, height: u32, annotations: &[Annotation]) -> CanvasBoun
 }
 
 /// Clip image effects in source-pixel space, before translating onto a larger canvas.
-/// Preserve the renderer's integer origin/extent rounding, including fractional edges.
+/// Uses the renderer's outward rounding (`outward_span`), including fractional edges.
 pub fn source_region(
     top_left: crate::geometry::Point,
     size: crate::geometry::Size,
@@ -136,10 +136,10 @@ pub fn source_region(
     {
         return None;
     }
-    let x = top_left.x.max(0.) as u32;
-    let y = top_left.y.max(0.) as u32;
-    let w = ((size.width + top_left.x.min(0.)).max(0.) as u32).min(width.saturating_sub(x));
-    let h = ((size.height + top_left.y.min(0.)).max(0.) as u32).min(height.saturating_sub(y));
+    let (x, w) = crate::geometry::outward_span(top_left.x, size.width);
+    let (y, h) = crate::geometry::outward_span(top_left.y, size.height);
+    let w = w.min(width.saturating_sub(x));
+    let h = h.min(height.saturating_sub(y));
     (w > 0 && h > 0).then_some((x, y, w, h))
 }
 

@@ -402,7 +402,10 @@ fn fit_left(text: &str, max_w: f32, size: f32, scale: f32) -> String {
 }
 
 impl SettingsUi {
-    pub fn new(config: Config) -> Self {
+    pub fn new(mut config: Config) -> Self {
+        // A hand-edited 0, 100 or nan would otherwise show raw, step from the
+        // wrong place and be saved back; drawing already uses this value.
+        config.general.default_thickness = config.clamped_thickness();
         Self {
             config,
             icons: IconCache::new(),

@@ -27,9 +27,7 @@ pub fn acquire(
                     CreateEventW, CreateMutexW, OpenEventW, SetEvent, WaitForSingleObject,
                     EVENT_MODIFY_STATE, INFINITE,
                 },
-                UI::WindowsAndMessaging::{
-                    AllowSetForegroundWindow, FindWindowW, GetWindowThreadProcessId, ASFW_ANY,
-                },
+                UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY},
             },
         };
         let mutex = CreateMutexW(None, false, w!("Local\\SnippingToolUL.SingleInstance"))
@@ -39,18 +37,11 @@ pub fn acquire(
             if !request_show {
                 return Ok(None);
             }
-            if let Ok(hwnd) = FindWindowW(None, w!("Snipping Tool UL")) {
-                let mut pid = 0;
-                GetWindowThreadProcessId(hwnd, Some(&mut pid));
-                if pid != 0 {
-                    let _ = AllowSetForegroundWindow(pid);
-                }
-            } else {
-                // Home is destroyed while the app sits in the tray, so there is
-                // no window to find. This launcher is foreground; let the running
-                // process take focus when it recreates Home.
-                let _ = AllowSetForegroundWindow(ASFW_ANY);
-            }
+            // This launcher is foreground; let the running process take focus
+            // when it shows or recreates Home. A lookup by window title could
+            // grant it to Explorer instead, whose window for the default
+            // "Snipping Tool UL" pictures folder carries the same title.
+            let _ = AllowSetForegroundWindow(ASFW_ANY);
             for _ in 0..25 {
                 if let Ok(event) = OpenEventW(
                     EVENT_MODIFY_STATE,

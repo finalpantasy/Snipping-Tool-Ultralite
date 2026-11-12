@@ -295,8 +295,8 @@ impl App {
         }
     }
 
-    /// Records the check, whatever its result, so the next one waits a week,
-    /// and offers a newer release in Home and the tray menu. Failures stay silent.
+    /// Records an answered check so the next one waits a week, and offers a
+    /// newer release in Home and the tray menu. Failed checks never get here.
     fn finish_update_check(&mut self, release: Option<snipping_tool_ul::update_check::Release>) {
         let now = unix_now();
         self.config.general.last_update_check = now;
@@ -522,11 +522,15 @@ impl App {
                             if n < o.annotations.len() {
                                 let old = o.annotations[n].clone();
                                 recolor_annotation(&mut o.annotations[n], color);
-                                record_undo(
-                                    &mut o.undo_stack,
-                                    &mut o.redo_stack,
-                                    UndoAction::Modify(n, old),
-                                );
+                                // Re-applying the current color is not an edit; recording it
+                                // would also throw away the redo history.
+                                if o.annotations[n] != old {
+                                    record_undo(
+                                        &mut o.undo_stack,
+                                        &mut o.redo_stack,
+                                        UndoAction::Modify(n, old),
+                                    );
+                                }
                             }
                         } else {
                             o.set_color_all(color);
@@ -614,11 +618,15 @@ impl App {
                             if n < o.annotations.len() {
                                 let old = o.annotations[n].clone();
                                 recolor_annotation(&mut o.annotations[n], color);
-                                record_undo(
-                                    &mut o.undo_stack,
-                                    &mut o.redo_stack,
-                                    UndoAction::Modify(n, old),
-                                );
+                                // Re-applying the current color is not an edit; recording it
+                                // would also throw away the redo history.
+                                if o.annotations[n] != old {
+                                    record_undo(
+                                        &mut o.undo_stack,
+                                        &mut o.redo_stack,
+                                        UndoAction::Modify(n, old),
+                                    );
+                                }
                             }
                         } else {
                             o.set_color_all(color);
@@ -874,11 +882,7 @@ impl App {
                     // The same area again, captured directly, when all of it is
                     // still on screen. After a display change the ordinary
                     // picker runs instead of a cropped or empty snip.
-                    let repeat = repeat.filter(|r| {
-                        r.width > 0
-                            && r.height > 0
-                            && r.intersect(capture::virtual_bounds()) == Some(*r)
-                    });
+                    let repeat = repeat.filter(|r| r.covered_by(&capture::monitor_rects()));
                     if let Some(rect) = repeat {
                         let clipboard_ticket = snipping_tool_ul::clipboard_queue::reserve();
                         let screen = capture::capture_region(rect).map_err(|e| e.to_string())?;
@@ -2881,6 +2885,15 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         return;
                     }
+                    WindowEvent::CursorLeft { .. } => {
+                        if let Some(ref mut hw) = self.history_window {
+                            if hw.on_cursor_left() {
+                                hw.needs_redraw = true;
+                                hw.window.request_redraw();
+                            }
+                        }
+                        return;
+                    }
                     WindowEvent::MouseInput {
                         state: ElementState::Pressed,
                         button: WinitMouseButton::Left,
@@ -4138,11 +4151,15 @@ impl ApplicationHandler<UserEvent> for App {
                                                 &mut overlay.annotations[sel_idx],
                                                 presets[idx],
                                             );
-                                            record_undo(
-                                                &mut overlay.undo_stack,
-                                                &mut overlay.redo_stack,
-                                                UndoAction::Modify(sel_idx, old_ann),
-                                            );
+                                            // Re-applying the current color is not an edit; recording it
+                                            // would also throw away the redo history.
+                                            if overlay.annotations[sel_idx] != old_ann {
+                                                record_undo(
+                                                    &mut overlay.undo_stack,
+                                                    &mut overlay.redo_stack,
+                                                    UndoAction::Modify(sel_idx, old_ann),
+                                                );
+                                            }
                                         }
                                     } else {
                                         overlay.set_color_all(presets[idx]);
@@ -4416,11 +4433,15 @@ impl ApplicationHandler<UserEvent> for App {
                                                 &mut overlay.annotations[idx],
                                                 new_color,
                                             );
-                                            record_undo(
-                                                &mut overlay.undo_stack,
-                                                &mut overlay.redo_stack,
-                                                UndoAction::Modify(idx, old_ann),
-                                            );
+                                            // Re-applying the current color is not an edit; recording it
+                                            // would also throw away the redo history.
+                                            if overlay.annotations[idx] != old_ann {
+                                                record_undo(
+                                                    &mut overlay.undo_stack,
+                                                    &mut overlay.redo_stack,
+                                                    UndoAction::Modify(idx, old_ann),
+                                                );
+                                            }
                                         }
                                     }
                                     self.needs_redraw = true;
@@ -4647,7 +4668,19 @@ fn start_update_check(config: &Config, proxy: &EventLoopProxy<UserEvent>) {
     let spawned = std::thread::Builder::new()
         .name("update-check".into())
         .spawn(move || {
-            let _ = proxy.send_event(UserEvent::UpdateChecked(fetch_newer_release()));
+            // At login the network is often not up yet. A failed check is
+            // retried twice on this thread, then left for the next start;
+            // only an actual answer counts as this week's check.
+            for wait in [0, 120, 600] {
+                std::thread::sleep(std::time::Duration::from_secs(wait));
+                match fetch_newer_release() {
+                    Ok(release) => {
+                        let _ = proxy.send_event(UserEvent::UpdateChecked(release));
+                        return;
+                    }
+                    Err(error) => tracing::debug!("Update check failed: {error}"),
+                }
+            }
         });
     if let Err(error) = spawned {
         tracing::warn!("Update check not started: {error}");

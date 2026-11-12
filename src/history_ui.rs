@@ -127,6 +127,7 @@ impl HistoryWindow {
         let old = self.scroll_offset;
         self.scroll_offset = (self.scroll_offset - delta * 40.0).clamp(0.0, self.max_scroll());
         if (self.scroll_offset - old).abs() > 0.01 {
+            self.update_hover();
             self.needs_redraw = true;
             true
         } else {
@@ -195,7 +196,22 @@ impl HistoryWindow {
         let x = x / scale;
         let y = y / scale;
         self.cursor_pos = (x, y);
+        self.update_hover()
+    }
 
+    /// The pointer left the window: nothing stays highlighted.
+    pub fn on_cursor_left(&mut self) -> bool {
+        let changed = self.hovered.is_some() || self.hover_clear;
+        self.cursor_pos = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+        self.hovered = None;
+        self.hover_clear = false;
+        changed
+    }
+
+    /// Hit-tests the stored cursor position, e.g. after scrolling moved the
+    /// tiles under a pointer that stayed still. Returns true if hover changed.
+    fn update_hover(&mut self) -> bool {
+        let (x, y) = self.cursor_pos;
         let old_hovered = self.hovered;
         let old_clear = self.hover_clear;
 

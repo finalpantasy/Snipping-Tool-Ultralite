@@ -612,12 +612,11 @@ pub fn render_annotation(
             };
 
             let bs = (*block_size).max(1) as usize;
-            // Shrink the region when the origin is clamped to 0 so the pixelated
-            // area matches the annotation rect instead of extending right/down.
-            let rw = (size.width + top_left.x.min(0.0)).max(0.0) as usize;
-            let rh = (size.height + top_left.y.min(0.0)).max(0.0) as usize;
-            let rx = top_left.x.max(0.0) as usize;
-            let ry = top_left.y.max(0.0) as usize;
+            // Every pixel the rect touches, clipped at 0, so fractional edges
+            // never leave a sliver unredacted.
+            let (rx, rw) = crate::geometry::outward_span(top_left.x, size.width);
+            let (ry, rh) = crate::geometry::outward_span(top_left.y, size.height);
+            let (rx, rw, ry, rh) = (rx as usize, rw as usize, ry as usize, rh as usize);
             let pm_w = pixmap.width() as usize;
             let pm_h = pixmap.height() as usize;
             if src_width == 0 || rx >= pm_w || ry >= pm_h {

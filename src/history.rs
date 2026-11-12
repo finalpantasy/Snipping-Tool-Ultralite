@@ -17,6 +17,13 @@ fn is_history_image(path: &std::path::Path) -> bool {
         )
     })
 }
+/// A staging file left by a save that never finished (power loss, killed
+/// process). It holds part of a capture, so clearing history removes it too.
+fn is_history_staging_file(path: &std::path::Path) -> bool {
+    path.extension()
+        .is_some_and(|x| x.eq_ignore_ascii_case("part"))
+        && is_history_image(&path.with_extension(""))
+}
 fn reserve_path(
     dir: &std::path::Path,
     ext: &str,
@@ -298,6 +305,10 @@ fn clear_directories(dirs: &[PathBuf]) -> Result<usize, String> {
                         failed += 1;
                     }
                 }
+                // Saves hold the history lock, so no staging file is in use here.
+                Ok(entry) if is_history_staging_file(&entry.path()) => {
+                    let _ = std::fs::remove_file(entry.path());
+                }
                 Err(_) => failed += 1,
                 _ => {}
             }
@@ -391,6 +402,8 @@ mod clear_tests {
         std::fs::write(local.join("123.png"), b"new").unwrap();
         std::fs::write(legacy.join("123.png"), b"old").unwrap();
         std::fs::write(legacy.join("keep.txt"), b"not a capture").unwrap();
+        std::fs::write(local.join("124.png.part"), b"half a capture").unwrap();
+        std::fs::write(legacy.join("notes.txt.part"), b"not ours").unwrap();
         assert_eq!(
             clear_directories(&[local.clone(), legacy.clone()]).unwrap(),
             2
@@ -398,6 +411,8 @@ mod clear_tests {
         assert!(ordered_entries(&local).is_empty());
         assert!(ordered_entries(&legacy).is_empty());
         assert!(legacy.join("keep.txt").exists());
+        assert!(!local.join("124.png.part").exists());
+        assert!(legacy.join("notes.txt.part").exists());
         std::fs::create_dir(local.join("locked.png")).unwrap();
         assert!(clear_directories(&[local])
             .unwrap_err()
