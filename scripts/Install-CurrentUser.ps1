@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Executable=(Join-Path $PSScriptRoot '..\snipping-tool-ul.exe'),
-    [string]$Version='0.3.27',
+    [string]$Version='0.3.28',
     [string]$NoticeFolder='',
     [switch]$ReplaceWindowsSnippingTool,
     [switch]$Apply,

@@ -16,7 +16,10 @@ fn main() {
     for _ in 0..runs {
         std::hint::black_box(snipping_tool_ul::tools::measure_text_width(latin, 24.));
     }
-    println!("Latin width, per call        {:8.4} ms", ms(t) / runs as f64);
+    println!(
+        "Latin width, per call        {:8.4} ms",
+        ms(t) / runs as f64
+    );
 
     let t = Instant::now();
     snipping_tool_ul::tools::measure_text_width("日", 24.);
@@ -25,7 +28,9 @@ fn main() {
     // Each character below sits in a new 128-code-point block.
     let mut worst: f64 = 0.;
     let mut total = 0.;
-    let samples: Vec<char> = (0..40).map(|i| char::from_u32(0x4E00 + i * 0x200).unwrap()).collect();
+    let samples: Vec<char> = (0..40)
+        .map(|i| char::from_u32(0x4E00 + i * 0x200).unwrap())
+        .collect();
     let mut text = String::new();
     for ch in &samples {
         text.push(*ch);

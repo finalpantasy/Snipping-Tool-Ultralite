@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.3.28 preview
 
+- **Type in Japanese, Chinese or Korean.** The Text tool accepts input-method text. The word you are composing shows in place, and the candidate list opens beside it. Characters Open Sans lacks are drawn with Windows' own Yu Gothic, Microsoft YaHei, Malgun Gothic or Segoe UI Symbol, which load only when first needed.
+- **Esc cancels a delayed snip.** Before, the countdown ignored the keyboard until you clicked it.
+- **JPEG saves keep transparent areas white.** Saving an image with transparency as JPEG used to fill those areas with black.
+- **One letter per tool.** If you give a tool a shortcut another tool already uses, the two swap letters.
 - **Pixelate and spotlight cover every pixel they touch.** A box drawn at a fractional position (for example while zoomed) left a 1 to 2 pixel strip on its right and bottom edge unredacted. Preview, Copy, Save, Upload and Pin all agree.
 - **Snip the same area again** now opens the picker when part of that area is no longer on a monitor (after unplugging or rearranging displays, or across the gap beside a smaller monitor), instead of copying black pixels.
 - A failed weekly update check no longer counts as done. The network is often not ready at login, so the app retries after 2 and 10 minutes and, failing that, at the next start.

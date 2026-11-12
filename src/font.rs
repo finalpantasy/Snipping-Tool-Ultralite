@@ -275,7 +275,8 @@ pub fn text_fonts_from(text: &str, fallbacks: &'static [Fallback]) -> TextFonts 
     let primary = FONT.for_text(text);
     let mut missing: Vec<char> = text
         .chars()
-        .filter(|ch| !ch.is_control() && !ch.is_whitespace() && !FONT.mapped(*ch as u32))
+        // Whitespace counts too: an IME's full-width space (U+3000) is not in Open Sans.
+        .filter(|ch| !ch.is_control() && !FONT.mapped(*ch as u32))
         .collect();
     let mut extra = Vec::new();
     for fallback in fallbacks {

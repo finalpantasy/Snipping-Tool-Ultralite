@@ -95,6 +95,21 @@ fn ime_text_draws_real_glyphs_from_a_system_font() {
 }
 
 #[test]
+fn a_full_width_space_beside_kanji_uses_the_fallback_not_a_box() {
+    let Some(collection) = system_font("YuGothM.ttc").or_else(|| system_font("msyh.ttc")) else {
+        eprintln!("skipped: no Japanese or Chinese system font");
+        return;
+    };
+    // U+3000 shares a 128-character block with kana, not with these kanji.
+    let fonts = font::text_fonts_from("日本\u{3000}語", leaked(vec![collection]));
+    let notdef = font::FONT.metrics('\u{3000}', 40.);
+    let space = fonts.metrics('\u{3000}', 40.);
+    assert_eq!((space.width, space.height), (0, 0), "{space:?}");
+    assert!(space.advance_width > 30., "{space:?}");
+    assert_ne!(space.advance_width, notdef.advance_width);
+}
+
+#[test]
 fn hangul_comes_from_the_korean_font_after_a_font_without_it() {
     let (Some(korean), Some(symbols)) = (system_font("malgun.ttf"), system_font("seguisym.ttf"))
     else {
