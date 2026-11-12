@@ -15,11 +15,11 @@ fn reference_pixelation(
     else {
         return;
     };
-    let x = top_left.x.max(0.) as u32;
-    let y = top_left.y.max(0.) as u32;
-    let w = ((size.width + top_left.x.min(0.)).max(0.) as u32).min(screen.width.saturating_sub(x));
-    let h =
-        ((size.height + top_left.y.min(0.)).max(0.) as u32).min(screen.height.saturating_sub(y));
+    // Region rounding follows the 2026-11-11 outward rule; drawing is unchanged.
+    let (x, w) = crate::geometry::outward_span(top_left.x, size.width);
+    let (y, h) = crate::geometry::outward_span(top_left.y, size.height);
+    let w = w.min(screen.width.saturating_sub(x));
+    let h = h.min(screen.height.saturating_sub(y));
     if w == 0 || h == 0 || !scale.is_finite() || scale <= 0. {
         return;
     }

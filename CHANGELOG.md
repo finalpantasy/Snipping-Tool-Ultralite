@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.28 preview
+
+- **Type in Japanese, Chinese or Korean.** The Text tool accepts input-method text. The word you are composing shows in place, and the candidate list opens beside it. Characters Open Sans lacks are drawn with Windows' own Yu Gothic, Microsoft YaHei, Malgun Gothic or Segoe UI Symbol, which load only when first needed.
+- **Esc cancels a delayed snip.** Before, the countdown ignored the keyboard until you clicked it.
+- **JPEG saves keep transparent areas white.** Saving an image with transparency as JPEG used to fill those areas with black.
+- **One letter per tool.** If you give a tool a shortcut another tool already uses, the two swap letters.
+- **Pixelate and spotlight cover every pixel they touch.** A box drawn at a fractional position (for example while zoomed) left a 1 to 2 pixel strip on its right and bottom edge unredacted. Preview, Copy, Save, Upload and Pin all agree.
+- **Snip the same area again** now opens the picker when part of that area is no longer on a monitor (after unplugging or rearranging displays, or across the gap beside a smaller monitor), instead of copying black pixels.
+- A failed weekly update check no longer counts as done. The network is often not ready at login, so the app retries after 2 and 10 minutes and, failing that, at the next start.
+- Pins open faster. Building the window for a 4K snip takes 9.8 ms on the UI thread instead of 41 ms.
+- Saving as `shot.bmp` or any name without a PNG, JPEG or WebP extension adds `.png`, so the name matches the file.
+- Clear history also removes the partial file a crash or power loss can leave behind mid-save.
+- Opening Snipping Tool UL again while an Explorer window shows its pictures folder now brings Home to the front; the old lookup could hand focus to Explorer, whose window has the same title.
+- History tiles no longer stay highlighted after the pointer leaves. While you scroll, the highlight follows the pointer.
+- Settings shows and saves the line thickness the editor actually uses when `config.toml` holds an out-of-range value.
+- Clicking the color an annotation already has no longer adds an empty undo step or clears Redo.
+
 ## 0.3.27 preview
 
 - **Copy knows what is on the clipboard.** The button says *Copied* while the clipboard still holds your snip exactly as shown, and turns back into *Copy* after you edit or another app copies something. It flashes briefly when a copy lands.

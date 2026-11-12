@@ -402,7 +402,10 @@ fn fit_left(text: &str, max_w: f32, size: f32, scale: f32) -> String {
 }
 
 impl SettingsUi {
-    pub fn new(config: Config) -> Self {
+    pub fn new(mut config: Config) -> Self {
+        // A hand-edited 0, 100 or nan would otherwise show raw, step from the
+        // wrong place and be saved back; drawing already uses this value.
+        config.general.default_thickness = config.clamped_thickness();
         Self {
             config,
             icons: IconCache::new(),
@@ -654,7 +657,7 @@ impl SettingsUi {
     pub fn on_key_press(&mut self, key: &str) -> bool {
         if let Some(idx) = self.editing_shortcut {
             if !key.is_empty() {
-                self.config.shortcuts.set_by_index(idx, key.to_string());
+                self.config.shortcuts.assign(idx, key.to_string());
             }
             self.editing_shortcut = None;
             self.needs_redraw = true;

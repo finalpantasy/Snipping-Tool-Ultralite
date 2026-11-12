@@ -653,7 +653,7 @@ impl PreviewRenderer {
             }
         }
         let has_live = progress.is_some()
-            || (state.text_input_active && !state.text_input_buffer.is_empty())
+            || (state.text_input_active && !state.text_input_display().is_empty())
             || (state.active_tool == crate::tools::ToolKind::Eyedropper
                 && state.eyedropper_preview.is_some());
         if !has_live {
@@ -778,12 +778,12 @@ fn draw_live(
             guide(canvas, &transformed(a, c.scale, c.ox, c.oy), dpi, false);
         }
     }
-    if state.text_input_active && !state.text_input_buffer.is_empty() {
+    if state.text_input_active && !state.text_input_display().is_empty() {
         draw_annotation(
             canvas,
             &Annotation::Text {
                 position: state.text_input_position,
-                text: state.text_input_buffer.clone(),
+                text: state.text_input_display().into_owned(),
                 color: state.current_color,
                 font_size: state.text_input_font_size,
             },

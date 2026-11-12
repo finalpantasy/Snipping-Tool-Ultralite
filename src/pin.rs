@@ -23,6 +23,52 @@ const PIN_BORDER: u32 = 3;
 /// Shadow offset for pinned windows
 const PIN_SHADOW: u32 = 2;
 
+/// The pin's window pixels: the image inside an accent border, with a
+/// semi-transparent shadow offset bottom-right. Each byte is written once,
+/// row by row; image rows are copied whole.
+pub fn framed_pixels(pixels: &[u8], img_w: u32, img_h: u32, accent: (u8, u8, u8)) -> Vec<u8> {
+    let (border, shadow) = (PIN_BORDER as usize, PIN_SHADOW as usize);
+    let (iw, ih) = (img_w as usize, img_h as usize);
+    let (tw, th) = (iw + border * 2 + shadow, ih + border * 2 + shadow);
+    let (fw, fh) = (tw - shadow, th - shadow);
+    let accent = [accent.0, accent.1, accent.2, 255];
+    let accent_row = accent.repeat(fw);
+    // Right of the frame: shadow from column `shadow` on, clear before it.
+    let edge: Vec<u8> = (fw..tw)
+        .flat_map(|x| if x >= shadow { [0, 0, 0, 100] } else { [0; 4] })
+        .collect();
+    let mut below = vec![0u8; shadow * 4];
+    below.extend([0, 0, 0, 100].repeat(tw - shadow));
+    let mut framed = Vec::with_capacity(tw * th * 4);
+    for y in 0..th {
+        if y >= fh {
+            if y >= shadow {
+                framed.extend_from_slice(&below);
+            } else {
+                framed.resize(framed.len() + tw * 4, 0);
+            }
+            continue;
+        }
+        if (border..border + ih).contains(&y) {
+            let start = (y - border) * iw * 4;
+            let row = pixels.get(start..).unwrap_or(&[]);
+            let copied = (row.len() / 4).min(iw);
+            framed.extend_from_slice(&accent_row[..border * 4]);
+            framed.extend_from_slice(&row[..copied * 4]);
+            // A short source leaves the rest of the row in the border color.
+            framed.extend_from_slice(&accent_row[..(iw - copied + border) * 4]);
+        } else {
+            framed.extend_from_slice(&accent_row);
+        }
+        if y >= shadow {
+            framed.extend_from_slice(&edge);
+        } else {
+            framed.resize(framed.len() + edge.len(), 0);
+        }
+    }
+    framed
+}
+
 static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
 
 /// Both the window and its encoder own this guard. The file is removed only
@@ -85,46 +131,7 @@ impl PinnedWindow {
         let total_w = img_w + border * 2 + shadow;
         let total_h = img_h + border * 2 + shadow;
 
-        // Build the framed pixel buffer
-        let mut framed = vec![0u8; (total_w * total_h * 4) as usize];
-
-        // Shadow fill (dark in both themes, offset bottom-right)
-        for y in shadow..total_h {
-            for x in shadow..total_w {
-                let i = ((y * total_w + x) * 4) as usize;
-                if i + 3 < framed.len() {
-                    framed[i] = 0;
-                    framed[i + 1] = 0;
-                    framed[i + 2] = 0;
-                    framed[i + 3] = 100; // semi-transparent (visible in the saved PNG)
-                }
-            }
-        }
-
-        // Border fill (theme accent)
-        let (bd_r, bd_g, bd_b) = crate::theme::accent();
-        for y in 0..total_h - shadow {
-            for x in 0..total_w - shadow {
-                let i = ((y * total_w + x) * 4) as usize;
-                if i + 3 < framed.len() {
-                    framed[i] = bd_r; // theme accent R
-                    framed[i + 1] = bd_g;
-                    framed[i + 2] = bd_b;
-                    framed[i + 3] = 255;
-                }
-            }
-        }
-
-        // Copy the actual image inside the border
-        for y in 0..img_h {
-            for x in 0..img_w {
-                let src = ((y * img_w + x) * 4) as usize;
-                let dst = (((y + border) * total_w + x + border) * 4) as usize;
-                if src + 3 < pixels.len() && dst + 3 < framed.len() {
-                    framed[dst..dst + 4].copy_from_slice(&pixels[src..src + 4]);
-                }
-            }
-        }
+        let framed = framed_pixels(pixels, img_w, img_h, crate::theme::accent());
 
         let pin_x = screen_x - border as i32;
         let pin_y = screen_y - border as i32;

@@ -75,8 +75,9 @@ pub fn newest_release(reply: &str, current: &str) -> Option<Release> {
         .filter(|r| is_newer(&r.version, current))
 }
 
-/// Asks GitHub once, with a short timeout. Any failure returns `None`.
-pub fn fetch_newer_release() -> Option<Release> {
+/// Asks GitHub once, with a short timeout. `Ok(None)` means GitHub answered
+/// and nothing newer exists; `Err` means there was no usable answer.
+pub fn fetch_newer_release() -> Result<Option<Release>, String> {
     let current = env!("CARGO_PKG_VERSION");
     let reply = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(10))
@@ -88,10 +89,10 @@ pub fn fetch_newer_release() -> Option<Release> {
             concat!("Snipping-Tool-UL/", env!("CARGO_PKG_VERSION")),
         )
         .call()
-        .ok()?
+        .map_err(|e| e.to_string())?
         .into_string()
-        .ok()?;
-    newest_release(&reply, current)
+        .map_err(|e| e.to_string())?;
+    Ok(newest_release(&reply, current))
 }
 
 /// Opens a release page in the default browser. Only GitHub pages for this

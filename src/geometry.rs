@@ -22,6 +22,16 @@ impl Size {
     }
 }
 
+/// Whole pixels touched by `start..start + len`, clipped at 0: the origin
+/// rounds down and the end rounds up, so a pixelate or spotlight at
+/// fractional coordinates never leaves a partly covered edge pixel out.
+/// Returns (origin, extent); float casts saturate, so huge values are safe.
+pub fn outward_span(start: f32, len: f32) -> (u32, u32) {
+    let origin = start.max(0.).floor();
+    let end = (start + len).ceil();
+    (origin as u32, (end - origin).max(0.) as u32)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Color {
     pub r: f32,

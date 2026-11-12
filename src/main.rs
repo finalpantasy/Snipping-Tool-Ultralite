@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 use clap::Parser;
 use tray_icon::menu::MenuEvent;
 use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
-use winit::event::{ElementState, MouseButton as WinitMouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{
+    ElementState, Ime, MouseButton as WinitMouseButton, MouseScrollDelta, WindowEvent,
+};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 #[cfg(not(target_os = "windows"))]
@@ -186,6 +188,9 @@ struct App {
     copy_press: Option<Point>,
     /// Space is held in the editor: left-drag pans.
     space_held: bool,
+    /// The window input methods are enabled on and where their candidate
+    /// list was last placed, while text is being typed.
+    ime: Option<(WindowId, [i32; 3])>,
     /// The held Space was used to pan, so releasing it does not fit.
     space_panned: bool,
     registered_hotkey: Option<String>,
@@ -280,6 +285,7 @@ impl App {
             repeat_region: None,
             copy_press: None,
             space_held: false,
+            ime: None,
             space_panned: false,
             registered_hotkey: None,
             idle_trimmed: false,
@@ -295,8 +301,8 @@ impl App {
         }
     }
 
-    /// Records the check, whatever its result, so the next one waits a week,
-    /// and offers a newer release in Home and the tray menu. Failures stay silent.
+    /// Records an answered check so the next one waits a week, and offers a
+    /// newer release in Home and the tray menu. Failed checks never get here.
     fn finish_update_check(&mut self, release: Option<snipping_tool_ul::update_check::Release>) {
         let now = unix_now();
         self.config.general.last_update_check = now;
@@ -522,11 +528,15 @@ impl App {
                             if n < o.annotations.len() {
                                 let old = o.annotations[n].clone();
                                 recolor_annotation(&mut o.annotations[n], color);
-                                record_undo(
-                                    &mut o.undo_stack,
-                                    &mut o.redo_stack,
-                                    UndoAction::Modify(n, old),
-                                );
+                                // Re-applying the current color is not an edit; recording it
+                                // would also throw away the redo history.
+                                if o.annotations[n] != old {
+                                    record_undo(
+                                        &mut o.undo_stack,
+                                        &mut o.redo_stack,
+                                        UndoAction::Modify(n, old),
+                                    );
+                                }
                             }
                         } else {
                             o.set_color_all(color);
@@ -614,11 +624,15 @@ impl App {
                             if n < o.annotations.len() {
                                 let old = o.annotations[n].clone();
                                 recolor_annotation(&mut o.annotations[n], color);
-                                record_undo(
-                                    &mut o.undo_stack,
-                                    &mut o.redo_stack,
-                                    UndoAction::Modify(n, old),
-                                );
+                                // Re-applying the current color is not an edit; recording it
+                                // would also throw away the redo history.
+                                if o.annotations[n] != old {
+                                    record_undo(
+                                        &mut o.undo_stack,
+                                        &mut o.redo_stack,
+                                        UndoAction::Modify(n, old),
+                                    );
+                                }
                             }
                         } else {
                             o.set_color_all(color);
@@ -775,6 +789,78 @@ impl App {
         self.repeat_region = None;
     }
 
+    /// Input methods are on only while a text annotation is being typed, so
+    /// tool letters and shortcuts never go to an IME, and the candidate list
+    /// follows the text caret.
+    fn sync_ime(&mut self) {
+        let Some(window) = self.overlay_window.clone() else {
+            self.ime = None;
+            return;
+        };
+        let typing = match &self.state {
+            AppState::Capturing(o) if o.text_input_active => Some(o),
+            _ => None,
+        };
+        let Some(o) = typing else {
+            if self.ime.take().is_some_and(|(id, _)| id == window.id()) {
+                window.set_ime_allowed(false);
+            }
+            return;
+        };
+        let size = window.inner_size();
+        let (scale, ox, oy) = if self.is_preview {
+            let l = self.editor_view.framed_layout(
+                o.screenshot.width,
+                o.screenshot.height,
+                size.width,
+                size.height,
+                window.scale_factor(),
+            );
+            (l.scale, l.x, l.y)
+        } else {
+            (1., 0., 0.)
+        };
+        let width = snipping_tool_ul::tools::measure_text_width(
+            &o.text_input_display(),
+            o.text_input_font_size,
+        );
+        let area = [
+            (ox + f64::from(o.text_input_position.x + width) * scale).round() as i32,
+            (oy + f64::from(o.text_input_position.y) * scale).round() as i32,
+            (f64::from(o.text_input_font_size) * scale).round().max(1.) as i32,
+        ];
+        if self
+            .ime
+            .is_some_and(|(id, at)| id == window.id() && at == area)
+        {
+            return;
+        }
+        if self.ime.is_none_or(|(id, _)| id != window.id()) {
+            window.set_ime_allowed(true);
+        }
+        window.set_ime_cursor_area(
+            winit::dpi::PhysicalPosition::new(area[0], area[1]),
+            winit::dpi::PhysicalSize::new(1, area[2] as u32),
+        );
+        self.ime = Some((window.id(), area));
+    }
+
+    fn is_countdown_escape(&self, id: u32) -> bool {
+        self.countdown
+            .as_ref()
+            .and_then(Countdown::escape_hotkey_id)
+            .is_some_and(|escape| escape == id)
+    }
+
+    /// Cancel a delayed capture and bring back the canvas it hid, keeping the image.
+    fn cancel_countdown(&mut self, event_loop: &ActiveEventLoop) {
+        self.countdown = None;
+        self.capture_at = None;
+        if std::mem::take(&mut self.restore_home_on_cancel) {
+            self.restore_capture_canvas(event_loop);
+        }
+    }
+
     /// Returns whether any UL window was on screen and has just been hidden.
     fn minimize_capture_windows(&mut self) -> bool {
         let mut hidden = false;
@@ -874,11 +960,7 @@ impl App {
                     // The same area again, captured directly, when all of it is
                     // still on screen. After a display change the ordinary
                     // picker runs instead of a cropped or empty snip.
-                    let repeat = repeat.filter(|r| {
-                        r.width > 0
-                            && r.height > 0
-                            && r.intersect(capture::virtual_bounds()) == Some(*r)
-                    });
+                    let repeat = repeat.filter(|r| r.covered_by(&capture::monitor_rects()));
                     if let Some(rect) = repeat {
                         let clipboard_ticket = snipping_tool_ul::clipboard_queue::reserve();
                         let screen = capture::capture_region(rect).map_err(|e| e.to_string())?;
@@ -2441,6 +2523,10 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::Tray(event) => self.pending_tray.push(event),
             UserEvent::Hotkey(event) => {
                 if event.state == global_hotkey::HotKeyState::Pressed
+                    && self.is_countdown_escape(event.id)
+                {
+                    self.cancel_countdown(event_loop);
+                } else if event.state == global_hotkey::HotKeyState::Pressed
                     && Some(event.id) == self.hotkey_id
                 {
                     // While Settings is recording a new shortcut, the registered
@@ -2881,6 +2967,15 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         return;
                     }
+                    WindowEvent::CursorLeft { .. } => {
+                        if let Some(ref mut hw) = self.history_window {
+                            if hw.on_cursor_left() {
+                                hw.needs_redraw = true;
+                                hw.window.request_redraw();
+                            }
+                        }
+                        return;
+                    }
                     WindowEvent::MouseInput {
                         state: ElementState::Pressed,
                         button: WinitMouseButton::Left,
@@ -3098,23 +3193,14 @@ impl ApplicationHandler<UserEvent> for App {
             if cd.window_id() == _window_id {
                 match event {
                     WindowEvent::CloseRequested => {
-                        self.countdown = None;
-                        self.capture_at = None; // cancel the delayed capture
-                        if std::mem::take(&mut self.restore_home_on_cancel) {
-                            self.restore_capture_canvas(_event_loop);
-                        }
+                        self.cancel_countdown(_event_loop);
                         return;
                     }
                     WindowEvent::KeyboardInput { ref event, .. }
                         if event.state == ElementState::Pressed
                             && event.logical_key == Key::Named(NamedKey::Escape) =>
                     {
-                        self.countdown = None;
-                        self.capture_at = None;
-                        // Restore the canvas without discarding the previous image.
-                        if std::mem::take(&mut self.restore_home_on_cancel) {
-                            self.restore_capture_canvas(_event_loop);
-                        }
+                        self.cancel_countdown(_event_loop);
                         return;
                     }
                     WindowEvent::RedrawRequested => {
@@ -3632,6 +3718,26 @@ impl ApplicationHandler<UserEvent> for App {
                 self.modifiers = mods.state();
             }
 
+            WindowEvent::Ime(ime) => {
+                if overlay.text_input_active {
+                    match ime {
+                        Ime::Preedit(text, _) => overlay.text_preedit = text,
+                        Ime::Commit(text) => {
+                            overlay.text_preedit.clear();
+                            overlay
+                                .text_input_buffer
+                                .push_str(&text.replace(['\r', '\n'], " "));
+                        }
+                        Ime::Disabled => overlay.text_preedit.clear(),
+                        Ime::Enabled => {}
+                    }
+                    self.needs_redraw = true;
+                    if let Some(w) = &self.overlay_window {
+                        w.request_redraw();
+                    }
+                }
+            }
+
             WindowEvent::KeyboardInput {
                 event,
                 is_synthetic,
@@ -3705,6 +3811,11 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 // --- Text input guard: MUST be first ---
                 if overlay.text_input_active {
+                    // While an IME composes, Enter, Escape and Backspace are its
+                    // keys; the finished text arrives as an Ime::Commit.
+                    if !overlay.text_preedit.is_empty() {
+                        return;
+                    }
                     let ctrl = self.modifiers.control_key();
                     match &event.logical_key {
                         Key::Character(ch) if ctrl && ch.as_str().eq_ignore_ascii_case("v") => {
@@ -3746,6 +3857,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 overlay.annotations.insert(idx, old_ann);
                             }
                             overlay.text_input_buffer.clear();
+                            overlay.text_preedit.clear();
                             overlay.text_input_active = false;
                             self.needs_redraw = true;
                         }
@@ -4138,11 +4250,15 @@ impl ApplicationHandler<UserEvent> for App {
                                                 &mut overlay.annotations[sel_idx],
                                                 presets[idx],
                                             );
-                                            record_undo(
-                                                &mut overlay.undo_stack,
-                                                &mut overlay.redo_stack,
-                                                UndoAction::Modify(sel_idx, old_ann),
-                                            );
+                                            // Re-applying the current color is not an edit; recording it
+                                            // would also throw away the redo history.
+                                            if overlay.annotations[sel_idx] != old_ann {
+                                                record_undo(
+                                                    &mut overlay.undo_stack,
+                                                    &mut overlay.redo_stack,
+                                                    UndoAction::Modify(sel_idx, old_ann),
+                                                );
+                                            }
                                         }
                                     } else {
                                         overlay.set_color_all(presets[idx]);
@@ -4416,11 +4532,15 @@ impl ApplicationHandler<UserEvent> for App {
                                                 &mut overlay.annotations[idx],
                                                 new_color,
                                             );
-                                            record_undo(
-                                                &mut overlay.undo_stack,
-                                                &mut overlay.redo_stack,
-                                                UndoAction::Modify(idx, old_ann),
-                                            );
+                                            // Re-applying the current color is not an edit; recording it
+                                            // would also throw away the redo history.
+                                            if overlay.annotations[idx] != old_ann {
+                                                record_undo(
+                                                    &mut overlay.undo_stack,
+                                                    &mut overlay.redo_stack,
+                                                    UndoAction::Modify(idx, old_ann),
+                                                );
+                                            }
                                         }
                                     }
                                     self.needs_redraw = true;
@@ -4494,10 +4614,15 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.process_tray_events(event_loop);
+        self.sync_ime();
 
         // Drain ALL pending hotkey events, not just one per wakeup
         while let Ok(event) = global_hotkey::GlobalHotKeyEvent::receiver().try_recv() {
             if event.state == global_hotkey::HotKeyState::Pressed
+                && self.is_countdown_escape(event.id)
+            {
+                self.cancel_countdown(event_loop);
+            } else if event.state == global_hotkey::HotKeyState::Pressed
                 && Some(event.id) == self.hotkey_id
             {
                 tracing::info!("Global hotkey pressed — triggering capture");
@@ -4647,7 +4772,19 @@ fn start_update_check(config: &Config, proxy: &EventLoopProxy<UserEvent>) {
     let spawned = std::thread::Builder::new()
         .name("update-check".into())
         .spawn(move || {
-            let _ = proxy.send_event(UserEvent::UpdateChecked(fetch_newer_release()));
+            // At login the network is often not up yet. A failed check is
+            // retried twice on this thread, then left for the next start;
+            // only an actual answer counts as this week's check.
+            for wait in [0, 120, 600] {
+                std::thread::sleep(std::time::Duration::from_secs(wait));
+                match fetch_newer_release() {
+                    Ok(release) => {
+                        let _ = proxy.send_event(UserEvent::UpdateChecked(release));
+                        return;
+                    }
+                    Err(error) => tracing::debug!("Update check failed: {error}"),
+                }
+            }
         });
     if let Err(error) = spawned {
         tracing::warn!("Update check not started: {error}");

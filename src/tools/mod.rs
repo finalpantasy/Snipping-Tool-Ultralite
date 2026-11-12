@@ -612,12 +612,11 @@ pub fn render_annotation(
             };
 
             let bs = (*block_size).max(1) as usize;
-            // Shrink the region when the origin is clamped to 0 so the pixelated
-            // area matches the annotation rect instead of extending right/down.
-            let rw = (size.width + top_left.x.min(0.0)).max(0.0) as usize;
-            let rh = (size.height + top_left.y.min(0.0)).max(0.0) as usize;
-            let rx = top_left.x.max(0.0) as usize;
-            let ry = top_left.y.max(0.0) as usize;
+            // Every pixel the rect touches, clipped at 0, so fractional edges
+            // never leave a sliver unredacted.
+            let (rx, rw) = crate::geometry::outward_span(top_left.x, size.width);
+            let (ry, rh) = crate::geometry::outward_span(top_left.y, size.height);
+            let (rx, rw, ry, rh) = (rx as usize, rw as usize, ry as usize, rh as usize);
             let pm_w = pixmap.width() as usize;
             let pm_h = pixmap.height() as usize;
             if src_width == 0 || rx >= pm_w || ry >= pm_h {
@@ -843,7 +842,7 @@ pub fn render_annotation(
 /// Measure the rendered width of single-line text using the embedded font's
 /// advance metrics — matches exactly what `render_text_annotation` produces.
 pub fn measure_text_width(text: &str, font_size: f32) -> f32 {
-    let font = crate::font::FONT.for_text(text);
+    let font = crate::font::text_fonts(text);
     text.chars()
         .map(|ch| font.metrics(ch, font_size).advance_width)
         .sum()
@@ -857,7 +856,7 @@ pub fn measure_text_height(font_size: f32) -> f32 {
         .unwrap_or(font_size)
 }
 pub fn text_ink_bounds(text: &str, size: f32) -> (f32, f32, f32, f32) {
-    let font = crate::font::FONT.for_text(text);
+    let font = crate::font::text_fonts(text);
     let ascent = font
         .horizontal_line_metrics(size)
         .map_or(size, |m| m.ascent);
@@ -895,7 +894,7 @@ pub fn render_text_annotation(
     color: &Color,
     font_size: f32,
 ) {
-    let font = crate::font::FONT.for_text(text);
+    let font = crate::font::text_fonts(text);
 
     let pw = pixmap.width() as i32;
     let ph = pixmap.height() as i32;
@@ -1102,7 +1101,7 @@ pub fn hit_test_annotation(annotation: &Annotation, point: &Point, threshold: f3
             text,
             ..
         } => {
-            let font = crate::font::FONT.for_text(text);
+            let font = crate::font::text_fonts(text);
             let text_width: f32 = text
                 .chars()
                 .map(|c| font.metrics(c, *font_size).advance_width)

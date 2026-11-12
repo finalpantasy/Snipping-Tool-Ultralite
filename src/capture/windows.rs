@@ -36,6 +36,29 @@ pub fn virtual_bounds() -> ScreenRect {
     }
 }
 
+/// Physical rectangles of the attached monitors.
+pub fn monitor_rects() -> Vec<ScreenRect> {
+    use windows::Win32::Foundation::{BOOL, LPARAM, RECT};
+    use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, HMONITOR};
+    unsafe extern "system" fn collect(_: HMONITOR, _: HDC, rect: *mut RECT, data: LPARAM) -> BOOL {
+        let monitors = &mut *(data.0 as *mut Vec<ScreenRect>);
+        if let Some(r) = rect.as_ref() {
+            monitors.push(ScreenRect::between((r.left, r.top), (r.right, r.bottom)));
+        }
+        true.into()
+    }
+    let mut monitors = Vec::new();
+    unsafe {
+        let _ = EnumDisplayMonitors(
+            None,
+            None,
+            Some(collect),
+            LPARAM(&mut monitors as *mut Vec<ScreenRect> as isize),
+        );
+    }
+    monitors
+}
+
 pub fn capture_region(rect: ScreenRect) -> Result<CapturedScreen, CaptureError> {
     let rect = rect
         .intersect(virtual_bounds())

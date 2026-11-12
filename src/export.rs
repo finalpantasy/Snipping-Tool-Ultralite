@@ -108,12 +108,9 @@ pub fn apply_spotlights(
     }
     let data = pixmap.data_mut();
     for (tl, sz) in spotlights {
-        // Shrink the region when the origin is clamped so the cutout matches
-        // the annotation rect instead of extending right/down.
-        let sw = (sz.width + tl.x.min(0.0)).max(0.0) as u32;
-        let sh = (sz.height + tl.y.min(0.0)).max(0.0) as u32;
-        let sx = tl.x.max(0.0) as u32;
-        let sy = tl.y.max(0.0) as u32;
+        // Same whole-pixel span as the pixelate and canvas clipping paths.
+        let (sx, sw) = crate::geometry::outward_span(tl.x, sz.width);
+        let (sy, sh) = crate::geometry::outward_span(tl.y, sz.height);
         let copy_w = sw
             .min(source_width.saturating_sub(sx))
             .min(pw.saturating_sub(sx));
@@ -491,7 +488,41 @@ pub fn choose_save_path(initial_dir: Option<&std::path::Path>) -> Option<std::pa
     if let Some(dir) = initial_dir.filter(|p| p.is_dir()) {
         dialog = dialog.set_directory(dir);
     }
-    dialog.save_file()
+    dialog.save_file().map(with_image_extension)
+}
+
+/// A typed name such as `shot.bmp` or `notes.final` would otherwise get PNG
+/// bytes under a name that says something else; keep it and add `.png`.
+pub fn with_image_extension(path: std::path::PathBuf) -> std::path::PathBuf {
+    let known = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| ["png", "jpg", "jpeg", "webp"].contains(&e.to_lowercase().as_str()));
+    if known {
+        return path;
+    }
+    let mut name = path.into_os_string();
+    name.push(".png");
+    name.into()
+}
+
+/// JPEG has no alpha. Dropping it shows whatever color a transparent pixel
+/// stores, usually black, so composite over white the way Paint does.
+pub fn rgb_on_white(img: &image::RgbaImage) -> image::RgbImage {
+    let (w, h) = img.dimensions();
+    let mut rgb = Vec::with_capacity(w as usize * h as usize * 3);
+    for p in img.as_raw().chunks_exact(4) {
+        let a = u32::from(p[3]);
+        if a == 255 {
+            rgb.extend_from_slice(&p[..3]);
+        } else {
+            let white = 255 * (255 - a);
+            for &c in &p[..3] {
+                rgb.push(((u32::from(c) * a + white + 127) / 255) as u8);
+            }
+        }
+    }
+    image::RgbImage::from_raw(w, h, rgb).expect("three bytes per pixel")
 }
 
 /// Encode an explicit, already chosen path. No dialog is opened here.
@@ -515,7 +546,7 @@ pub fn save_image_to_path(
         let mut writer = std::io::BufWriter::new(file);
         if ext == "jpg" || ext == "jpeg" {
             // The crate default (75, subsampled) smears text edges in screenshots.
-            let rgb = image::DynamicImage::ImageRgba8(img).to_rgb8();
+            let rgb = rgb_on_white(&img);
             image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, 92)
                 .encode_image(&rgb)
                 .map_err(|e| e.to_string())?;

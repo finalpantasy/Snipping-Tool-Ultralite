@@ -3,7 +3,7 @@
 ## Capture and edit
 
 - Region, window and full-screen capture; configurable hotkeys and 3/5/10-second timers.
-- UL minimizes its canvas and hides its controls before capture, including before a timer starts. Cancelling a timer restores the previous preview. The tray tooltip and **Capture screenshot** menu show the registered hotkey, including a fallback when the chosen binding is unavailable.
+- UL minimizes its canvas and hides its controls before capture, including before a timer starts. Press **Esc** or click the countdown to cancel a timer; the previous preview comes back. The tray tooltip and **Capture screenshot** menu show the registered hotkey, including a fallback when the chosen binding is unavailable.
 - Capture freezes a snapshot of the desktop when selection begins. Select from that still image, so advancing video frames or later popups cannot change the resulting snip. With a timer, the snapshot is taken after the countdown. The temporary full-desktop image is released when the selection finishes or is cancelled.
 - Image clipboard output for pasting into chats. Copy updates annotations without closing the preview. The button reads **Copied** while the clipboard still holds the image as shown and **Copy** after an edit or another app's copy.
 - Press **Copy** and drag to drop the image into another app as a PNG file (Explorer, chat, email, browser). A drag that nothing accepts copies instead. On a pinned snip, Ctrl+drag. Drag files are kept in Temp for ten minutes, then removed.
@@ -13,8 +13,9 @@
 - Hold **Space** and click-drag, or middle-mouse drag, to pan the image; pointer-centered wheel zoom scales it. Ctrl+0 resets the view; tapping **Space** recenters and fits the image while Select is active. Export keeps the original resolution.
 - Smooth pencil strokes, arrows, shapes, word highlights, pixelation, text and numbered steps.
 - Draw beyond any image edge to grow the canvas with white space. Moving, resizing or deleting annotations shrinks unused space again, down to the original image size. Undo and redo restore the matching canvas. The image stays steady while drawing; use zoom and middle-mouse pan to reach further. Copy, Save, Upload and Pin include the complete canvas.
+- Tool letters are set in **Settings > Shortcuts**. Giving a tool a letter another tool uses swaps the two.
 - Live width and size controls: slider, numeric box and minus/plus buttons. Arrowheads scale with width.
-- Text uses Open Sans, with a visible size control. Ordinary scrolling stays zoom.
+- Text uses Open Sans, with a visible size control. Ordinary scrolling stays zoom. Japanese, Chinese and Korean input methods work in the Text tool; characters Open Sans lacks are drawn with Windows' Yu Gothic, Microsoft YaHei, Malgun Gothic or Segoe UI Symbol.
 - **Select** (V) selects annotations to move, resize or change; it does not pan the image. Click targets keep a consistent screen size at any zoom. Right-click a numbered step to delete it; later steps renumber. Undo restores the whole change.
 - **Tools > Hide private info** pixelates email addresses, phone, card and account numbers, IP addresses and key-like tokens found by Windows' built-in text recognition, as one undo step. It runs only when clicked and never uploads anything. It can miss text the recognizer misreads, so check the result before sharing.
 - Save, OCR, pin on screen, optional history and auto-save. History keeps the last 20 images locally for copying again; it is separate from auto-save. Both are off by default. Enable history in Options > Settings > General > Keep capture history.
@@ -65,7 +66,7 @@ cargo test --locked
 
 Portable builds remap build-user paths. `-Examples headless_bench` adds the CPU benchmark helper. `cargo run --example editing_preview` and `cargo run --example settings_preview` render actual UI code with synthetic images, without windows, capture, clipboard writes or uploads. Set `SNIPPING_TOOL_UL_CONFIG_DIR` to an isolated test directory.
 
-The release includes bounded native capture, hotkey, clipboard-copy status and zoom checks. External-app pasting, timers, mixed-monitor acceptance and a full interactive memory soak remain open. [Current verification](VERIFICATION-0.3.27.md) separates measured evidence from those gaps.
+The release includes bounded native capture, hotkey, clipboard-copy status and zoom checks. External-app pasting, timers, mixed-monitor acceptance and a full interactive memory soak remain open. [Current verification](VERIFICATION-0.3.28.md) separates measured evidence from those gaps.
 
 This standalone repository derives from MIT-licensed [HydroShot](https://github.com/Real-Fruit-Snacks/HydroShot). Required attribution remains in [LICENSE](../LICENSE) and [third-party notices](../THIRD_PARTY_NOTICES.md). No upstream Git history is included.
 

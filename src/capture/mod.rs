@@ -3,7 +3,8 @@ mod windows;
 
 #[cfg(target_os = "windows")]
 pub use windows::{
-    capture_frozen_desktop, capture_region, initialize_dpi, virtual_bounds, BgraSnapshot,
+    capture_frozen_desktop, capture_region, initialize_dpi, monitor_rects, virtual_bounds,
+    BgraSnapshot,
 };
 
 /// Physical virtual-desktop coordinates, including negative monitor origins.
@@ -38,6 +39,19 @@ impl ScreenRect {
             width: (right - x) as u32,
             height: (bottom - y) as u32,
         })
+    }
+
+    /// True when every pixel lies on one of the (non-overlapping) monitors.
+    /// The virtual-desktop box alone also contains gaps between monitors of
+    /// different sizes, which capture as black.
+    pub fn covered_by(self, monitors: &[ScreenRect]) -> bool {
+        let area = u64::from(self.width) * u64::from(self.height);
+        let covered: u64 = monitors
+            .iter()
+            .filter_map(|m| self.intersect(*m))
+            .map(|r| u64::from(r.width) * u64::from(r.height))
+            .sum();
+        area > 0 && covered == area
     }
 }
 

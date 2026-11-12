@@ -7,7 +7,7 @@ pub fn reference_text(
     color: &Color,
     font_size: f32,
 ) {
-    let font = snipping_tool_ul::font::FONT.for_text(text);
+    let font = snipping_tool_ul::font::text_fonts(text);
 
     let pw = pixmap.width() as i32;
     let ph = pixmap.height() as i32;

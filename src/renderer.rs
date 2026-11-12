@@ -244,10 +244,11 @@ pub fn render_overlay(state: &mut OverlayState, pixmap: &mut tiny_skia::Pixmap) 
     }
 
     // 7. Text input preview (in-progress text being typed)
-    if state.text_input_active && !state.text_input_buffer.is_empty() {
+    let typed = state.text_input_display();
+    if state.text_input_active && !typed.is_empty() {
         let preview = Annotation::Text {
             position: state.text_input_position,
-            text: state.text_input_buffer.clone(),
+            text: typed.to_string(),
             color: state.current_color,
             font_size: state.text_input_font_size,
         };
@@ -255,8 +256,8 @@ pub fn render_overlay(state: &mut OverlayState, pixmap: &mut tiny_skia::Pixmap) 
     }
     // Text cursor (vertical white line after text)
     if state.text_input_active {
-        let cursor_x = state.text_input_position.x
-            + measure_text_width(&state.text_input_buffer, state.text_input_font_size);
+        let cursor_x =
+            state.text_input_position.x + measure_text_width(&typed, state.text_input_font_size);
         let cursor_y = state.text_input_position.y;
         let cursor_h = state.text_input_font_size;
         let mut pb = PathBuilder::new();
