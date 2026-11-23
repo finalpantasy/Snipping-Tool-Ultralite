@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Esc cancels the snip picker even when another window keeps focus.** Windows sometimes refuses to bring the picker to the front, for example when another program such as an AutoHotkey remap sends the capture shortcut. Esc then went to that program and the picker stayed open. A keyboard hook held only while the picker is open now catches a plain Esc (thanks to tikkamasalla).
+- Ctrl+Shift+Esc, Ctrl+Esc and Win+Esc keep working while the picker is open; only a plain Esc cancels it.
+- **Hold Shift while dragging to select a square.**
+
 ## 0.3.28 preview
 
 - **Type in Japanese, Chinese or Korean.** The Text tool accepts input-method text. The word you are composing shows in place, and the candidate list opens beside it. Characters Open Sans lacks are drawn with Windows' own Yu Gothic, Microsoft YaHei, Malgun Gothic or Segoe UI Symbol, which load only when first needed.

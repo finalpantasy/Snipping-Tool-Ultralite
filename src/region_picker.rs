@@ -2,6 +2,7 @@
 //! GDI paints the snapshot's own DIB section; no second full-screen buffer or
 //! full-frame conversion exists.
 use crate::capture::{BgraSnapshot, ScreenRect};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use windows::core::w;
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
@@ -13,7 +14,9 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
-use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, ReleaseCapture, SetCapture, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_RWIN,
+};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 struct FrozenSurface<'a> {
@@ -75,6 +78,8 @@ struct Picker {
     windows: *const crate::window_detect::WinRect,
     windows_len: usize,
     window_mode: bool,
+    /// Shift held on the latest mouse message: the region is a square.
+    square: bool,
 }
 
 impl Picker {
@@ -103,6 +108,11 @@ impl Picker {
             }
         } else {
             self.start.zip(end).and_then(|(start, end)| {
+                let end = if self.square {
+                    square_end(start, end)
+                } else {
+                    end
+                };
                 let mut rect = ScreenRect::between(start, end);
                 // The cursor cannot pass the last pixel, so reaching it means
                 // "to the edge": include it rather than stop one short.
@@ -130,6 +140,20 @@ impl Picker {
         self.done = true;
         true
     }
+}
+
+/// Moves `end` toward `start` along the longer axis so the drag spans a
+/// square whose side is the shorter of the two drag distances.
+fn square_end(start: (i32, i32), end: (i32, i32)) -> (i32, i32) {
+    let (dx, dy) = (
+        i64::from(end.0) - i64::from(start.0),
+        i64::from(end.1) - i64::from(start.1),
+    );
+    let side = dx.abs().min(dy.abs());
+    (
+        (i64::from(start.0) + side * dx.signum()) as i32,
+        (i64::from(start.1) + side * dy.signum()) as i32,
+    )
 }
 
 /// Decodes a packed mouse `LPARAM`; each half is a signed coordinate.
@@ -495,6 +519,7 @@ unsafe extern "system" fn picker_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
                 return LRESULT(0);
             }
             WM_MOUSEMOVE => {
+                (*pointer).square = wp.0 & MOUSE_SHIFT != 0;
                 if (*pointer).window_mode {
                     ensure_readout(pointer);
                 }
@@ -505,6 +530,7 @@ unsafe extern "system" fn picker_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
                 return LRESULT(0);
             }
             WM_LBUTTONUP => {
+                (*pointer).square = wp.0 & MOUSE_SHIFT != 0;
                 let end = cursor(hwnd, lp);
                 if !(*pointer).finish_click(end) {
                     return LRESULT(0);
@@ -532,6 +558,113 @@ unsafe extern "system" fn picker_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
         }
     }
     DefWindowProcW(hwnd, msg, wp, lp)
+}
+
+/// Veil HWND the keyboard hook posts Esc to; 0 while no picker is open.
+static HOOK_VEIL: AtomicIsize = AtomicIsize::new(0);
+/// The hook swallowed the current Esc press, so it owns the matching release.
+static HOOK_ESC_DOWN: AtomicBool = AtomicBool::new(false);
+
+const VK_ESC: u32 = 0x1b;
+/// `MK_SHIFT` in a mouse message's `WPARAM`.
+const MOUSE_SHIFT: usize = 0x0004;
+
+/// What the picker's keyboard hook does with one low-level key event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EscAction {
+    /// Not ours: the key reaches whatever window has focus.
+    Pass,
+    /// Swallow without acting (the release of a press the hook took).
+    Swallow,
+    /// Swallow and cancel the picker.
+    Cancel,
+}
+
+/// A plain Esc press cancels. Esc with Ctrl, Alt or Win passes through, so
+/// system shortcuts such as Ctrl+Shift+Esc (Task Manager) still work while
+/// the full-screen picker is up. A release is swallowed only when the hook
+/// took its press; otherwise the app that saw the press also sees the release.
+fn esc_hook_action(vk: u32, key_down: bool, modifier_held: bool, press_taken: bool) -> EscAction {
+    if vk != VK_ESC {
+        EscAction::Pass
+    } else if key_down {
+        if modifier_held {
+            EscAction::Pass
+        } else {
+            EscAction::Cancel
+        }
+    } else if press_taken {
+        EscAction::Swallow
+    } else {
+        EscAction::Pass
+    }
+}
+
+/// Low-level hook active while the picker runs. Windows may refuse the veil
+/// the foreground (focus rules, or a capture hotkey sent by another program),
+/// and then a plain WM_KEYDOWN would reach another app instead.
+unsafe extern "system" fn esc_hook_proc(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    if code == HC_ACTION as i32 && lp.0 != 0 {
+        let key = &*(lp.0 as *const KBDLLHOOKSTRUCT);
+        if key.vkCode == VK_ESC {
+            let message = wp.0 as u32;
+            let key_down = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
+            let held = |vk: VIRTUAL_KEY| GetAsyncKeyState(vk.0 as i32) < 0;
+            let modifier_held = key.flags.0 & LLKHF_ALTDOWN.0 != 0
+                || held(VK_CONTROL)
+                || held(VK_LWIN)
+                || held(VK_RWIN);
+            let press_taken = HOOK_ESC_DOWN.load(Ordering::SeqCst);
+            match esc_hook_action(key.vkCode, key_down, modifier_held, press_taken) {
+                EscAction::Pass => {}
+                EscAction::Swallow => {
+                    HOOK_ESC_DOWN.store(false, Ordering::SeqCst);
+                    return LRESULT(1);
+                }
+                EscAction::Cancel => {
+                    HOOK_ESC_DOWN.store(true, Ordering::SeqCst);
+                    let veil = HOOK_VEIL.load(Ordering::SeqCst);
+                    if veil != 0 {
+                        // Same cancellation as the window's own Esc handling.
+                        let _ = PostMessageW(
+                            HWND(veil as _),
+                            WM_KEYDOWN,
+                            WPARAM(VK_ESC as usize),
+                            LPARAM(0),
+                        );
+                    }
+                    return LRESULT(1);
+                }
+            }
+        }
+    }
+    CallNextHookEx(None, code, wp, lp)
+}
+
+/// Unhooks and clears the veil on drop, so every exit path releases the hook.
+struct EscHook(HHOOK);
+
+impl EscHook {
+    fn install(veil: HWND, instance: HINSTANCE) -> Option<Self> {
+        HOOK_ESC_DOWN.store(false, Ordering::SeqCst);
+        HOOK_VEIL.store(veil.0 as isize, Ordering::SeqCst);
+        match unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(esc_hook_proc), instance, 0) } {
+            Ok(hook) => Some(Self(hook)),
+            Err(_) => {
+                // The veil's own Esc handling still works when it has focus.
+                HOOK_VEIL.store(0, Ordering::SeqCst);
+                None
+            }
+        }
+    }
+}
+
+impl Drop for EscHook {
+    fn drop(&mut self) {
+        HOOK_VEIL.store(0, Ordering::SeqCst);
+        HOOK_ESC_DOWN.store(false, Ordering::SeqCst);
+        let _ = unsafe { UnhookWindowsHookEx(self.0) };
+    }
 }
 
 unsafe extern "system" fn border_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -668,6 +801,7 @@ fn select(
             windows: windows.as_ptr(),
             windows_len: windows.len(),
             window_mode,
+            square: false,
         };
         let veil = match CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_APPWINDOW | WS_EX_LAYERED,
@@ -704,6 +838,7 @@ fn select(
         }
         let _ = ShowWindow(veil, SW_SHOW);
         let _ = SetForegroundWindow(veil);
+        let esc_hook = EscHook::install(veil, instance);
         let mut message = MSG::default();
         let mut failed = false;
         loop {
@@ -724,6 +859,7 @@ fn select(
             let _ = TranslateMessage(&message);
             DispatchMessageW(&message);
         }
+        drop(esc_hook);
         let _ = ShowWindow(border, SW_HIDE);
         let _ = ShowWindow(state.readout, SW_HIDE);
         let _ = ShowWindow(veil, SW_HIDE);
@@ -748,6 +884,54 @@ fn select(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shift_drag_selects_a_square_in_every_direction() {
+        assert_eq!(square_end((10, 10), (50, 20)), (20, 20));
+        assert_eq!(square_end((10, 10), (0, -40)), (0, 0));
+        assert_eq!(square_end((10, 10), (-30, 25)), (-5, 25));
+        assert_eq!(square_end((10, 10), (10, 90)), (10, 10));
+        let mut picker = area_picker();
+        picker.square = true;
+        let rect = unsafe { picker.selection_at(Some((120, 60))) }.unwrap();
+        assert_eq!((rect.x, rect.y, rect.width, rect.height), (20, 30, 30, 30));
+        picker.square = false;
+        let rect = unsafe { picker.selection_at(Some((120, 60))) }.unwrap();
+        assert_eq!((rect.width, rect.height), (100, 30));
+    }
+
+    #[test]
+    fn esc_hook_cancels_on_plain_esc_and_owns_its_release() {
+        assert_eq!(
+            esc_hook_action(VK_ESC, true, false, false),
+            EscAction::Cancel
+        );
+        // Auto-repeat while held keeps cancelling (idempotent) and swallowing.
+        assert_eq!(
+            esc_hook_action(VK_ESC, true, false, true),
+            EscAction::Cancel
+        );
+        assert_eq!(
+            esc_hook_action(VK_ESC, false, false, true),
+            EscAction::Swallow
+        );
+    }
+
+    #[test]
+    fn esc_hook_leaves_other_keys_and_system_shortcuts_alone() {
+        // Any other key, down or up, always reaches the focused app.
+        assert_eq!(esc_hook_action(0x41, true, false, false), EscAction::Pass);
+        assert_eq!(esc_hook_action(0x41, false, false, true), EscAction::Pass);
+        // Ctrl+Shift+Esc, Ctrl+Esc, Alt+Esc and Win+Esc stay system shortcuts.
+        assert_eq!(esc_hook_action(VK_ESC, true, true, false), EscAction::Pass);
+        // A release whose press the hook did not take is not swallowed, so
+        // the app that saw the press never keeps a stuck Esc.
+        assert_eq!(
+            esc_hook_action(VK_ESC, false, false, false),
+            EscAction::Pass
+        );
+        assert_eq!(esc_hook_action(VK_ESC, false, true, false), EscAction::Pass);
+    }
 
     #[test]
     #[ignore = "manual headless GDI resource soak"]
@@ -1010,6 +1194,7 @@ mod tests {
             windows: std::ptr::null(),
             windows_len: 0,
             window_mode: false,
+            square: false,
         }
     }
 
@@ -1181,6 +1366,7 @@ mod tests {
             windows: std::ptr::null(),
             windows_len: 0,
             window_mode: false,
+            square: false,
         };
         assert!(!unsafe { picker.finish_click(Some((40, 20))) });
         assert!(!picker.done);
