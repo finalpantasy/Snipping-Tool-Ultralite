@@ -1,0 +1,98 @@
+# Builds the Windows download on GitHub's servers and signs a build attestation for it, so anyone can
+# check that a release zip came from this repo's code: gh attestation verify <zip> -R <repo>.
+# Run by hand (Actions > Verified release > Run workflow) to test: the zip is kept as the run's artifact.
+# Publishing a release runs it on the release's tag: the CI-built zip and SHA256SUMS replace the
+# release's files of the same name, and the release notes get a "Check this download" section.
+name: Verified release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable, as ci.yml
+
+      - name: Build
+        shell: pwsh
+        run: ./scripts/Build-Portable.ps1
+
+      # The same layout as the hand-made 0.3.28 zip: the exe, the top-level docs, assets/, docs/,
+      # scripts/ and SHA256.json (every other file's hash).
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, re, zipfile
+          from pathlib import Path
+          version = re.search(r'^version = "(.+)"', Path('Cargo.toml').read_text(), re.M).group(1)
+          files = {'snipping-tool-ul.exe': Path('target/release/snipping-tool-ul.exe')}
+          for name in ('CHANGELOG.md', 'LICENSE', 'README.md', 'THIRD_PARTY_NOTICES.md'):
+              files[name] = Path(name)
+          for folder in ('assets', 'docs', 'scripts'):
+              for p in sorted(Path(folder).rglob('*')):
+                  if p.is_file():
+                      files[p.as_posix()] = p
+          sums = {k: hashlib.sha256(v.read_bytes()).hexdigest().upper() for k, v in sorted(files.items())}
+          out = Path('out'); out.mkdir(exist_ok=True)
+          name = f'Snipping-Tool-UL-{version}-Windows-x64.zip'
+          with zipfile.ZipFile(out / name, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+              for k, v in sorted(files.items()):
+                  z.write(v, k)
+              z.writestr('SHA256.json', json.dumps(sums, indent=1) + '\n')
+          digest = hashlib.sha256((out / name).read_bytes()).hexdigest().upper()
+          sums_file = out / f'SHA256SUMS-{version}.txt'
+          sums_file.write_text(f'{digest}  {name}\n', newline='\n')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as o:
+              o.write(f'zip=out/{name}\nsums={sums_file.as_posix()}\n')
+          PY
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.package.outputs.zip }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verified-build
+          path: out/
+          compression-level: 0
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          ZIP: ${{ steps.package.outputs.zip }}
+          SUMS: ${{ steps.package.outputs.sums }}
+        run: |
+          gh release upload "$TAG" "$ZIP" "$SUMS" --clobber --repo "$GITHUB_REPOSITORY"
+          file=$(basename "$ZIP")
+          hash=$(sha256sum "$ZIP" | cut -d' ' -f1)
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
+          sed -i '/<!-- verified-build -->/,$d' notes.md
+          echo >> notes.md
+          cat >> notes.md <<EOF
+          <!-- verified-build -->
+          ### Check this download
+          GitHub built \`$file\` from this release's source code and signed a record of the build. To check your copy, install the [GitHub CLI](https://cli.github.com) and run:
+
+          \`\`\`
+          gh attestation verify $file -R $GITHUB_REPOSITORY
+          \`\`\`
+
+          SHA-256: \`$hash\`. Search it on [VirusTotal](https://www.virustotal.com/gui/file/$hash).
+          EOF
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
